@@ -1,0 +1,4 @@
+﻿rolname;Name;Enabled;rolcanlogin;nologin_sql
+adb_psi;adb_psi;False;True;"ALTER ROLE adb_psi NOLOGIN;"
+anshmaruk;Шмарук Александр Николаевич (Aleksandr Shmaruk);False;True;"ALTER ROLE anshmaruk NOLOGIN;"
+vpkhlyupin;Хлюпин Виктор Павлович (Viktor Khlyupin);False;True;"ALTER ROLE vpkhlyupin NOLOGIN;"

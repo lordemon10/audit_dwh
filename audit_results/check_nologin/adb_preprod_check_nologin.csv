@@ -1,0 +1,2 @@
+﻿rolname;Name;Enabled;rolcanlogin;nologin_sql
+anshmaruk;Шмарук Александр Николаевич (Aleksandr Shmaruk);False;True;"ALTER ROLE anshmaruk NOLOGIN;"

@@ -1,0 +1,9 @@
+﻿rolname;Name;Enabled;rolcanlogin;nologin_sql
+rauvarov;Уваров Роман Анатольевич (Roman Uvarov);False;True;"ALTER ROLE rauvarov NOLOGIN;"
+avavolkov;Волков Александр Васильевич (Aleksandr Volkov);False;True;"ALTER ROLE avavolkov NOLOGIN;"
+vnvokhmin;Вохмин Владимир Николаевич (Vladimir Vokhmin);False;True;"ALTER ROLE vnvokhmin NOLOGIN;"
+dbzinchenko;Зинченко Дмитрий Сергеевич (Dmitriy Zinchenko);False;True;"ALTER ROLE dbzinchenko NOLOGIN;"
+vvbezik;Безик Вероника Вячеславовна (Veronika Bezik);False;True;"ALTER ROLE vvbezik NOLOGIN;"
+mmrodin;Родин Максим Михайлович (Maksim Rodin);False;True;"ALTER ROLE mmrodin NOLOGIN;"
+aepryazhentsev;Пряженцев Алексей Евгеньевич (Aleksey Pryazhentsev);False;True;"ALTER ROLE aepryazhentsev NOLOGIN;"
+smdyugurov;Дюгуров Сергей Михайлович (Sergey Dyugurov);False;True;"ALTER ROLE smdyugurov NOLOGIN;"

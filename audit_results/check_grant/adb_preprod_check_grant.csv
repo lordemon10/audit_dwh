@@ -1,0 +1,3 @@
+﻿rolname;Name;table_name;privilege_type;revoke_sql
+pvzakrepin;Закрепин Павел Владимирович (Pavel Zakrepin);repl__core_sandbox__address;SELECT;"REVOKE SELECT ON etl.repl__core_sandbox__address FROM pvzakrepin;"
+pvzakrepin;Закрепин Павел Владимирович (Pavel Zakrepin);repl__core__agent_report;SELECT;"REVOKE SELECT ON etl.repl__core__agent_report FROM pvzakrepin;"

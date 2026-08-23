@@ -1,5 +1,6 @@
 import os
 import pandas as pd
+from utils import save_nologin_violations
 
 
 def run_check(db_df, ad_df, db_name, output_dir):
@@ -49,5 +50,6 @@ def run_check(db_df, ad_df, db_name, output_dir):
         ]
         report_df = violations[report_columns]
 
-        # 6. Сохраняем индивидуальный CSV-файл
-        report_df.to_csv(full_path, index=False, encoding="utf-8-sig", sep=";")
+        # 6. Сохраняем в БД
+        save_nologin_violations(db_name, report_df)
+

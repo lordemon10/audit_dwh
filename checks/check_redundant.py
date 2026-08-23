@@ -1,5 +1,6 @@
 import os
 import pandas as pd
+from utils import save_redundant_violations
 
 
 def run_check(db_df, ad_df, db_info, output_dir):
@@ -89,4 +90,5 @@ def run_check(db_df, ad_df, db_info, output_dir):
         report_df = pd.DataFrame(redundant_rows)
         print(f"Найдено нарушений: {len(report_df)} ")
 
-        report_df.to_csv(full_path, index=False, encoding="utf-8-sig", sep=";")
+        # Сохраняем в БД
+        save_redundant_violations(db_name, report_df)

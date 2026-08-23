@@ -25,6 +25,16 @@ AD_CONFIG = {
     "domain": "DC=rgs,DC=ru",
 }
 
+# Настройка БД для аудита (используем одну из существующих БД)
+AUDIT_DB = {
+    "name": "edw_prod",
+    "host": "server",
+    "db": "db_edw",
+    "port": 5434,
+    "user": DB_AUTH["user"],
+    "password": DB_AUTH["password"]
+}
+
 # SQL Запросы
 SQL_QUERY = {
     "rolcanlogin": """

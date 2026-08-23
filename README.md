@@ -1,30 +1,41 @@
 # Инвентаризация доступов в DWH выданных через БД & IDM & AD
 
 Скрипт помогает провести инвентаризацию доступов DWH автоматически. Скрипт оркеструет запросы к СУБД PostgreSQL и контроллерам домена Active Directory (LDAP), сопоставляет матрицы доступов и проверяет чистоту интеграции с системой IDM.
+
+**Важное изменение:** Результаты проверок теперь сохраняются в таблицу базы данных PostgreSQL вместо CSV-файлов. Для каждой проверки создана отдельная таблица с тремя служебными полями: `created_at` (дата создания записи), `last_checked_at` (дата последней проверки) и `is_active` (актуальна ли ошибка).
 ---
 
 ## 🔍 Описание проверок и структура отчетов
-Все результаты работы сохраняются в корневую папку `audit_results/`. Подпапка для конкретного правила создается **только в том случае, если в ней обнаружены нарушения**. Если нарушений нет — папка остается чистой.
+
+Все результаты работы сохраняются в базу данных PostgreSQL (настраивается в `config.py` параметр `AUDIT_DB`). Под каждую проверку создана отдельная таблица:
 
 ### 1. `check_nologin`
 * **Суть:** Проверяет уволенных сотрудников. Если учетная запись пользователя заблокирована в Active Directory (`Enabled = False`), скрипт проверяет, чтобы у соответствующей роли в PostgreSQL было отключено право входа (`rolcanlogin = False`).
-* **Результат:** Папка `audit_results/check_nologin/`. Генерация готовых команд блокировки вида: `ALTER ROLE имя_роли NOLOGIN;`.
+* **Таблица:** `audit_check_nologin`
+* **Колонки:** `id`, `rolname`, `Name`, `Enabled`, `rolcanlogin`, `nologin_sql`, `created_at`, `last_checked_at`, `is_active`
+* **SQL для блокировки:** `ALTER ROLE имя_роли NOLOGIN;`
 
 ### 2. `check_grant`
-* **Суть:** Проворяет grant уволенных сотрудников. Скрипт проверяет остались ли grant'ы в PostgreSQL у заблокированных пользователей.
-* **Результат:** Папка `audit_results/check_grant/`. Генерация готовых SQL-скриптов для очистки: `REVOKE [право] ON [схема].[таблица] FROM [роль];`.
+* **Суть:** Проверяет grant уволенных сотрудников. Скрипт проверяет остались ли grant'ы в PostgreSQL у заблокированных пользователей.
+* **Таблица:** `audit_check_grant`
+* **Колонки:** `id`, `rolname`, `Name`, `table_name`, `privilege_type`, `revoke_sql`, `created_at`, `last_checked_at`, `is_active`
+* **SQL для очистки:** `REVOKE [право] ON [схема].[таблица] FROM [роль];`
 
 ### 3. `check_redundant`
 * **Суть:** Находит пользователей, которым выдали прямой персональный грант на таблицу в базе данных, хотя они **уже имеют доступ** к этой схеме через ролевую модель AD.
-* **Результат:** Папка `audit_results/3_redundant_grants/`. Генерация SQL-команд `REVOKE` для удаления дублирующих прав.
+* **Таблица:** `audit_check_redundant`
+* **Колонки:** `id`, `db_name`, `rolname`, `Name`, `table_schema`, `table_name`, `privilege_type`, `duplicate_ad_group`, `revoke_sql`, `created_at`, `last_checked_at`, `is_active`
+* **SQL для удаления:** `REVOKE [право] ON [схема].[таблица] FROM [роль];`
 
 ### 4. `check_idm_dups`
 * **Суть:** Ищем сотрудников, у которых доступ к группе AD был выдан напрямую (`source == "Synchronization"`), но позже на этого же человека была назначена официальная бизнес-роль (`BR.*`), содержащая эту же группу. Выявляет логические задвоения.
-* **Результат:** Папка `audit_results/check_idm_dups/`. CSV-отчет с подтянутыми из домена ФИО сотрудников для удобства анализа.
+* **Таблица:** `audit_check_idm_dups`
+* **Колонки:** `id`, `login`, `Name`, `group_name`, `source`, `business_role`, `comment`, `created_at`, `last_checked_at`, `is_active`
 
 ### 5. `check_direct_ad`
-* **Суть:** Поиск AD групп выданных в обход IDM. Выгружает список сотрудников, у которых группа AD привязана напрямую ручными действиями администраторов домена (`source == "Synchronization"`), но при этом в IDM у пользователя  отсутствует бизнес-роль, дублирующая группу.
-* **Результат:** Папка `audit_results/check_direct_ad/`. CSV-отчет с ФИО нарушителей и комментарием для проведения расследования.
+* **Суть:** Поиск AD групп выданных в обход IDM. Выгружает список сотрудников, у которых группа AD привязана напрямую ручными действиями администраторов домена (`source == "Synchronization"`), но при этом в IDM у пользователя отсутствует бизнес-роль, дублирующая группу.
+* **Таблица:** `audit_check_direct_ad`
+* **Колонки:** `id`, `login`, `Name`, `group_name`, `source`, `business_role`, `comment`, `created_at`, `last_checked_at`, `is_active`
 
 ---
 
@@ -32,80 +43,7 @@
 
 Для полноценного запуска утилиты в корневой папке /data/ должен обязательно находиться один внешний файл:
 
-1. **`IDM.csv`** — актуальная выгрузка из базы данных IDM. Выгрузку необходимо запросить у администраторов IDM. Скрипт:
-
-```sql
-WITH user_role_group AS (
-SELECT 
-	a.SAMAccountName AS "user"
-	, o.Ident_Org AS "role"
-	, g.SAMAccountName AS "group"
-FROM dbo.Person p
-JOIN dbo.ADSAccount a
-	ON a.UID_Person = p.UID_Person
-	AND a.UID_ADSDomain = 'e7eab9fe-1479-4e94-9a4d-e0e0509de1b8'
-JOIN dbo.PersonInOrg pio
-	ON pio.UID_Person = p.UID_Person
-JOIN dbo.Org o
-	ON o.UID_Org = pio.UID_Org
-JOIN dbo.OrgHasADSGroup oha
-	ON oha.UID_Org = o.UID_Org
-JOIN dbo.ADSGroup g
-	ON g.UID_ADSGroup = oha.UID_ADSGroup
-	AND g.UID_ADSDomain = 'e7eab9fe-1479-4e94-9a4d-e0e0509de1b8'
-WHERE 1=1
-	AND (
-
-		 g.SAMAccountName LIKE 'EDW %'
-		OR g.SAMAccountName LIKE 'ODS %'
-		OR g.SAMAccountName LIKE 'DWHT %'
-		OR g.SAMAccountName LIKE 'ADB %'
-		OR g.SAMAccountName LIKE 'ADBT %'
-		OR g.SAMAccountName LIKE 'CBD %'
-		OR g.SAMAccountName LIKE 'ART %'
-	)
-), user_group AS (
-SELECT 
-	a.SAMAccountName AS "user"
-	, g.SAMAccountName AS "group"
-	, ag.XUserUpdated
-FROM dbo.ADSGroup g
-JOIN dbo.ADSAccountInADSGroup ag
-	ON ag.UID_ADSGroup = g.UID_ADSGroup
-JOIN dbo.ADSAccount a
-	ON a.UID_ADSAccount = ag.UID_ADSAccount
-	AND a.UID_ADSDomain = 'e7eab9fe-1479-4e94-9a4d-e0e0509de1b8'
-WHERE 1=1
-	AND g.UID_ADSDomain = 'e7eab9fe-1479-4e94-9a4d-e0e0509de1b8'
-	AND (
-         g.SAMAccountName LIKE 'EDW %'
-		OR g.SAMAccountName LIKE 'ODS %'
-		OR g.SAMAccountName LIKE 'DWHT %'
-		OR g.SAMAccountName LIKE 'ADB %'
-		OR g.SAMAccountName LIKE 'ADBT %'
-		OR g.SAMAccountName LIKE 'CBD %'
-		OR g.SAMAccountName LIKE 'ART %'
-	)
-)
-SELECT 
-	ug.[user]
-	, ug.[group]
-	, ug.XUserUpdated
-	, string_agg(CASE 
-		WHEN urg.[role] IS NULL THEN NULL ELSE urg.[role]
-	END, ',')
-FROM user_group ug
-LEFT JOIN user_role_group urg
-	ON urg."user" = ug."user"
-	AND urg."group" = ug."group"
-WHERE 1=1
-	AND ug.[user] = 'YVVorobev'
-GROUP BY ug.[user]
-	, ug.[group]
-	, ug.XUserUpdated
-ORDER BY 1, 2
-;
-```
+1. **`IDM.csv`** — актуальная выгрузка из базы данных IDM. Выгрузку необходимо запросить у администраторов IDM.
 
 ---
 
@@ -120,9 +58,72 @@ ORDER BY 1, 2
    ```bash
    pip install -r requirements.txt
    ```
-4. Настройте актуальные учетные данные доступов к вашим 4-м базам и контроллеру домена в файле `config.py` (пароли рекомендуется держать в безопасности).
+4. Настройте актуальные учетные данные доступов к вашим 4-м базам и контроллеру домена в файле `config.py`. Также настройте параметр `AUDIT_DB` для подключения к базе данных, где будут храниться результаты аудита.
 5. Положите актуальный файл `IDM.csv` в корень.
 6. Запустите комплексное сканирование:
    ```bash
    python main.py
    ```
+
+При первом запуске скрипт автоматически создаст таблицы для хранения результатов проверок в базе данных `AUDIT_DB`.
+
+---
+
+## 📊 Логика работы с нарушениями
+
+Для каждой проверки реализована следующая логика:
+
+- **Новое нарушение:** Создается запись с `created_at = CURRENT_TIMESTAMP`, `last_checked_at = CURRENT_TIMESTAMP`, `is_active = TRUE`.
+- **Нарушение подтвердилось:** Обновляется `last_checked_at = CURRENT_TIMESTAMP`, `is_active = TRUE`.
+- **Нарушение устранено:** Обновляется `last_checked_at = CURRENT_TIMESTAMP`, `is_active = FALSE`.
+
+Таким образом, в таблицах всегда сохраняется полная история нарушений, а поле `is_active` позволяет отфильтровать только актуальные проблемы.
+
+---
+
+## 🔍 Примеры SQL-запросов для анализа результатов
+
+### Получить все активные нарушения по проверке nologin:
+```sql
+SELECT * FROM audit_check_nologin WHERE is_active = TRUE;
+```
+
+### Получить историю нарушений для конкретного пользователя:
+```sql
+SELECT * FROM audit_check_grant 
+WHERE rolname = 'username' 
+ORDER BY created_at DESC;
+```
+
+### Получить статистику по всем проверкам:
+```sql
+SELECT 
+    'check_nologin' as check_type,
+    COUNT(*) as total_violations,
+    SUM(CASE WHEN is_active THEN 1 ELSE 0 END) as active_violations
+FROM audit_check_nologin
+UNION ALL
+SELECT 
+    'check_grant' as check_type,
+    COUNT(*) as total_violations,
+    SUM(CASE WHEN is_active THEN 1 ELSE 0 END) as active_violations
+FROM audit_check_grant
+UNION ALL
+SELECT 
+    'check_redundant' as check_type,
+    COUNT(*) as total_violations,
+    SUM(CASE WHEN is_active THEN 1 ELSE 0 END) as active_violations
+FROM audit_check_redundant
+UNION ALL
+SELECT 
+    'check_idm_dups' as check_type,
+    COUNT(*) as total_violations,
+    SUM(CASE WHEN is_active THEN 1 ELSE 0 END) as active_violations
+FROM audit_check_idm_dups
+UNION ALL
+SELECT 
+    'check_direct_ad' as check_type,
+    COUNT(*) as total_violations,
+    SUM(CASE WHEN is_active THEN 1 ELSE 0 END) as active_violations
+FROM audit_check_direct_ad;
+```

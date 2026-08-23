@@ -1,5 +1,6 @@
 import os
 import pandas as pd
+from utils import save_idm_dups_violations
 
 
 def run_check(idm_file_path, ad_df, output_dir):
@@ -71,7 +72,9 @@ def run_check(idm_file_path, ad_df, output_dir):
             report_df = report_df[final_columns].drop_duplicates()
 
             print(f"Найдено нарушений: {len(report_df)}")
-            report_df.to_csv(full_path, index=False, encoding="utf-8-sig", sep=";")
+            
+            # Сохраняем в БД
+            save_idm_dups_violations(report_df)
 
     except Exception as e:
         print(f"  Ошибка в Проверке 4: {e}")

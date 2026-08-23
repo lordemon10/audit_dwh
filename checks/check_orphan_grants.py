@@ -6,7 +6,7 @@
 
 import pandas as pd
 from utils.audit_db import save_orphan_grant_violations
-from utils.mapping_db import get_mapping_for_db, init_mapping_table, build_mapping_from_db
+from utils.mapping_db import get_mapping_for_db, init_mapping_table
 
 
 def get_cluster_name(db_name: str) -> str:

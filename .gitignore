@@ -1,1 +1,1 @@
-Nothing should be ignored in this case, as the modified files are only Python source code files (.py) which are not build artifacts, dependencies, or temporary files.
+Nothing should be ignored based on the provided file changes. The only modified file is 'checks/check_direct_ad.py', which is a source code file and should not be added to .gitignore.

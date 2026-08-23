@@ -58,8 +58,8 @@ def main():
     # --- БЛОК 2: АВТОНОМНАЯ ПРОВЕРКА IDM ---
 
     # Запускаем проверку №4
-    run_idm_check(idm_file_path=IDM_FILE_PATH, ad_df=ad_df, output_dir=OUTPUT_DIR)
-    run_direct_ad_check(idm_file_path=IDM_FILE_PATH, ad_df=ad_df, output_dir=OUTPUT_DIR)
+    run_idm_check(idm_file_path=IDM_FILE_PATH, ad_df=ad_df, output_dir=OUTPUT_DIR, db_name=AUDIT_DB["name"])
+    run_direct_ad_check(idm_file_path=IDM_FILE_PATH, ad_df=ad_df, output_dir=OUTPUT_DIR, db_name=AUDIT_DB["name"])
 
 
     print(

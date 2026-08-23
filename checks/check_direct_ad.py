@@ -3,7 +3,7 @@ import pandas as pd
 from utils import save_direct_ad_violations
 
 
-def run_check(idm_file_path, ad_df, output_dir):
+def run_check(idm_file_path, ad_df, output_dir, db_name):
     """Проверка №5: Поиск строк, где в 3-й колонке Synchronization, а в 4-й
 
     колонке роль НЕ пустая.

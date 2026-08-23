@@ -108,11 +108,30 @@ def init_audit_tables():
             );
             """
             
+            # Таблица для check_orphan_grants (сиротские гранты)
+            create_orphan_grants_table = """
+            CREATE TABLE IF NOT EXISTS audit_check_orphan_grants (
+                id SERIAL PRIMARY KEY,
+                db_name VARCHAR(100) NOT NULL,
+                user_name VARCHAR(255) NOT NULL,
+                schema_name VARCHAR(255) NOT NULL,
+                table_name VARCHAR(255),
+                privilege_type VARCHAR(50),
+                object_type VARCHAR(50),
+                reason TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                last_checked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                is_active BOOLEAN DEFAULT TRUE,
+                UNIQUE (db_name, user_name, schema_name, table_name, privilege_type, object_type)
+            );
+            """
+            
             cur.execute(create_nologin_table)
             cur.execute(create_grant_table)
             cur.execute(create_redundant_table)
             cur.execute(create_idm_dups_table)
             cur.execute(create_direct_ad_table)
+            cur.execute(create_orphan_grants_table)
             
             # Добавляем колонку db_name если её нет (для обратной совместимости)
             tables_to_check = [
@@ -330,6 +349,28 @@ def save_direct_ad_violations(db_name, violations_df):
             row.get("source", None),
             row.get("business_role", None),
             row.get("comment", None)
+        )
+        values_list.append(values)
+    
+    bulk_upsert_violations(table_name, unique_columns, data_columns, values_list)
+    print(f"Сохранено {len(violations_df)} нарушений в таблицу {table_name}")
+
+def save_orphan_grant_violations(db_name, violations_df):
+    """Сохранение результатов проверки check_orphan_grants в БД."""
+    table_name = "audit_check_orphan_grants"
+    data_columns = ["db_name", "user_name", "schema_name", "table_name", "privilege_type", "object_type", "reason"]
+    unique_columns = ["db_name", "user_name", "schema_name", "table_name", "privilege_type", "object_type"]
+    
+    values_list = []
+    for _, row in violations_df.iterrows():
+        values = (
+            db_name,
+            row.get("user_name", None),
+            row.get("schema_name", None),
+            row.get("table_name", None),
+            row.get("privilege_type", None),
+            row.get("object_type", None),
+            row.get("reason", None)
         )
         values_list.append(values)
     

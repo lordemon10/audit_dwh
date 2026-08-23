@@ -1,5 +1,5 @@
 import psycopg2
-from psycopg2.extras import execute_batch
+from psycopg2.extras import execute_values, execute_batch
 from config import AUDIT_DB
 
 def get_audit_connection():
@@ -14,105 +14,133 @@ def get_audit_connection():
     return psycopg2.connect(**connection_params)
 
 def init_audit_tables():
-    """Создание таблиц для каждой проверки, если они не существуют."""
-    
-    # Таблица для check_nologin
-    create_nologin_table = """
-    CREATE TABLE IF NOT EXISTS audit_check_nologin (
-        id SERIAL PRIMARY KEY,
-        db_name VARCHAR(100) NOT NULL,
-        rolname VARCHAR(255) NOT NULL,
-        Name VARCHAR(255),
-        Enabled BOOLEAN,
-        rolcanlogin BOOLEAN,
-        nologin_sql TEXT,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        last_checked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        is_active BOOLEAN DEFAULT TRUE,
-        UNIQUE (db_name, rolname, nologin_sql)
-    );
-    """
-    
-    # Таблица для check_grant
-    create_grant_table = """
-    CREATE TABLE IF NOT EXISTS audit_check_grant (
-        id SERIAL PRIMARY KEY,
-        db_name VARCHAR(100) NOT NULL,
-        rolname VARCHAR(255) NOT NULL,
-        Name VARCHAR(255),
-        table_name VARCHAR(255),
-        privilege_type VARCHAR(50),
-        revoke_sql TEXT,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        last_checked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        is_active BOOLEAN DEFAULT TRUE,
-        UNIQUE (db_name, rolname, table_name, privilege_type, revoke_sql)
-    );
-    """
-    
-    # Таблица для check_redundant
-    create_redundant_table = """
-    CREATE TABLE IF NOT EXISTS audit_check_redundant (
-        id SERIAL PRIMARY KEY,
-        db_name VARCHAR(100) NOT NULL,
-        rolname VARCHAR(255) NOT NULL,
-        Name VARCHAR(255),
-        table_schema VARCHAR(255),
-        table_name VARCHAR(255),
-        privilege_type VARCHAR(50),
-        duplicate_ad_group VARCHAR(255),
-        revoke_sql TEXT,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        last_checked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        is_active BOOLEAN DEFAULT TRUE,
-        UNIQUE (db_name, rolname, table_schema, table_name, privilege_type, revoke_sql)
-    );
-    """
-    
-    # Таблица для check_idm_dups
-    create_idm_dups_table = """
-    CREATE TABLE IF NOT EXISTS audit_check_idm_dups (
-        id SERIAL PRIMARY KEY,
-        db_name VARCHAR(100),
-        login VARCHAR(255) NOT NULL,
-        Name VARCHAR(255),
-        group_name VARCHAR(255),
-        source VARCHAR(100),
-        business_role VARCHAR(255),
-        comment TEXT,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        last_checked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        is_active BOOLEAN DEFAULT TRUE,
-        UNIQUE (login, group_name, source, business_role)
-    );
-    """
-    
-    # Таблица для check_direct_ad
-    create_direct_ad_table = """
-    CREATE TABLE IF NOT EXISTS audit_check_direct_ad (
-        id SERIAL PRIMARY KEY,
-        db_name VARCHAR(100),
-        login VARCHAR(255) NOT NULL,
-        Name VARCHAR(255),
-        group_name VARCHAR(255),
-        source VARCHAR(100),
-        business_role VARCHAR(255),
-        comment TEXT,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        last_checked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        is_active BOOLEAN DEFAULT TRUE,
-        UNIQUE (login, group_name, source, business_role)
-    );
-    """
+    """Создание таблиц для каждой проверки, если они не существуют, и добавление колонки db_name если её нет."""
     
     conn = get_audit_connection()
     try:
         with conn.cursor() as cur:
+            # Таблица для check_nologin
+            create_nologin_table = """
+            CREATE TABLE IF NOT EXISTS audit_check_nologin (
+                id SERIAL PRIMARY KEY,
+                db_name VARCHAR(100) NOT NULL,
+                rolname VARCHAR(255) NOT NULL,
+                Name VARCHAR(255),
+                Enabled BOOLEAN,
+                rolcanlogin BOOLEAN,
+                nologin_sql TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                last_checked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                is_active BOOLEAN DEFAULT TRUE,
+                UNIQUE (db_name, rolname, nologin_sql)
+            );
+            """
+            
+            # Таблица для check_grant
+            create_grant_table = """
+            CREATE TABLE IF NOT EXISTS audit_check_grant (
+                id SERIAL PRIMARY KEY,
+                db_name VARCHAR(100) NOT NULL,
+                rolname VARCHAR(255) NOT NULL,
+                Name VARCHAR(255),
+                table_name VARCHAR(255),
+                privilege_type VARCHAR(50),
+                revoke_sql TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                last_checked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                is_active BOOLEAN DEFAULT TRUE,
+                UNIQUE (db_name, rolname, table_name, privilege_type, revoke_sql)
+            );
+            """
+            
+            # Таблица для check_redundant
+            create_redundant_table = """
+            CREATE TABLE IF NOT EXISTS audit_check_redundant (
+                id SERIAL PRIMARY KEY,
+                db_name VARCHAR(100) NOT NULL,
+                rolname VARCHAR(255) NOT NULL,
+                Name VARCHAR(255),
+                table_schema VARCHAR(255),
+                table_name VARCHAR(255),
+                privilege_type VARCHAR(50),
+                duplicate_ad_group VARCHAR(255),
+                revoke_sql TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                last_checked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                is_active BOOLEAN DEFAULT TRUE,
+                UNIQUE (db_name, rolname, table_schema, table_name, privilege_type, revoke_sql)
+            );
+            """
+            
+            # Таблица для check_idm_dups
+            create_idm_dups_table = """
+            CREATE TABLE IF NOT EXISTS audit_check_idm_dups (
+                id SERIAL PRIMARY KEY,
+                db_name VARCHAR(100),
+                login VARCHAR(255) NOT NULL,
+                Name VARCHAR(255),
+                group_name VARCHAR(255),
+                source VARCHAR(100),
+                business_role VARCHAR(255),
+                comment TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                last_checked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                is_active BOOLEAN DEFAULT TRUE,
+                UNIQUE (login, group_name, source, business_role)
+            );
+            """
+            
+            # Таблица для check_direct_ad
+            create_direct_ad_table = """
+            CREATE TABLE IF NOT EXISTS audit_check_direct_ad (
+                id SERIAL PRIMARY KEY,
+                db_name VARCHAR(100),
+                login VARCHAR(255) NOT NULL,
+                Name VARCHAR(255),
+                group_name VARCHAR(255),
+                source VARCHAR(100),
+                business_role VARCHAR(255),
+                comment TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                last_checked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                is_active BOOLEAN DEFAULT TRUE,
+                UNIQUE (login, group_name, source, business_role)
+            );
+            """
+            
             cur.execute(create_nologin_table)
             cur.execute(create_grant_table)
             cur.execute(create_redundant_table)
             cur.execute(create_idm_dups_table)
             cur.execute(create_direct_ad_table)
+            
+            # Добавляем колонку db_name если её нет (для обратной совместимости)
+            tables_to_check = [
+                ('audit_check_nologin', 'rolname'),
+                ('audit_check_grant', 'rolname'),
+                ('audit_check_redundant', 'rolname'),
+                ('audit_check_idm_dups', 'login'),
+                ('audit_check_direct_ad', 'login')
+            ]
+            
+            for table_name, key_column in tables_to_check:
+                check_column_query = f"""
+                SELECT COUNT(*) 
+                FROM information_schema.columns 
+                WHERE table_name = '{table_name}' AND column_name = 'db_name'
+                """
+                cur.execute(check_column_query)
+                if cur.fetchone()[0] == 0:
+                    print(f"Добавляем колонку db_name в таблицу {table_name}...")
+                    add_column_query = f"""
+                    ALTER TABLE {table_name} 
+                    ADD COLUMN db_name VARCHAR(100) DEFAULT 'unknown'
+                    """
+                    cur.execute(add_column_query)
+                    
+                    # Обновляем UNIQUE constraint если нужно
+                    # Для простоты оставляем как есть, новые записи будут с правильным db_name
+            
             conn.commit()
         print("Таблицы аудита успешно созданы/проверены.")
     finally:
@@ -121,7 +149,7 @@ def init_audit_tables():
 def bulk_upsert_violations(table_name, unique_columns, data_columns, values_list):
     """
     Массовая вставка или обновление записей о нарушениях.
-    Использует временную таблицу для эффективной обработки больших объемов данных.
+    Оптимизировано для больших объемов данных с использованием execute_values.
     
     Args:
         table_name: имя таблицы
@@ -135,30 +163,6 @@ def bulk_upsert_violations(table_name, unique_columns, data_columns, values_list
     conn = get_audit_connection()
     try:
         with conn.cursor() as cur:
-            # Создаем временную таблицу для загрузки данных
-            temp_table = f"temp_{table_name}"
-            
-            # Определяем типы данных для временной таблицы (упрощенно - все TEXT кроме BOOLEAN)
-            # Для простоты используем ту же структуру, что и основная таблица
-            columns_str = ", ".join(data_columns)
-            
-            # Формируем условия для UNIQUE conflict
-            unique_str = ", ".join(unique_columns)
-            
-            # Сначала обновляем существующие записи
-            update_query = f"""
-            UPDATE {table_name} t
-            SET last_checked_at = CURRENT_TIMESTAMP,
-                is_active = TRUE
-            FROM (VALUES {",".join(["(%s)"] * len(values_list))}) AS v({unique_str})
-            WHERE {f" AND ".join([f"t.{col} = v.{col}" for col in unique_columns])}
-              AND t.is_active = TRUE
-            """
-            
-            # Для больших объемов данных используем более простой подход:
-            # 1. Помечаем все активные записи как неактивные
-            # 2. Вставляем новые данные с ON CONFLICT
-            
             # Шаг 1: Деактивируем все текущие активные записи
             deactivate_query = f"""
             UPDATE {table_name}
@@ -169,23 +173,42 @@ def bulk_upsert_violations(table_name, unique_columns, data_columns, values_list
             cur.execute(deactivate_query)
             
             # Шаг 2: Вставляем новые записи (или обновляем существующие)
-            placeholders = ", ".join(["%s"] * len(data_columns))
-            update_set = ", ".join([f"{col} = EXCLUDED.{col}" for col in data_columns if col not in unique_columns])
+            columns_str = ", ".join(data_columns)
+            unique_str = ", ".join(unique_columns)
+            
+            # Формируем динамический UPDATE для ON CONFLICT
+            update_set_parts = []
+            for col in data_columns:
+                if col not in unique_columns:
+                    update_set_parts.append(f"{col} = EXCLUDED.{col}")
+            
+            update_clause = ""
+            if update_set_parts:
+                update_clause = ", " + ", ".join(update_set_parts)
             
             insert_query = f"""
             INSERT INTO {table_name} ({columns_str}, created_at, last_checked_at, is_active)
-            VALUES ({placeholders}, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, TRUE)
+            VALUES %s
             ON CONFLICT ({unique_str}) 
             DO UPDATE SET 
                 last_checked_at = CURRENT_TIMESTAMP,
                 is_active = TRUE
-                {", " + update_set if update_set else ""}
+                {update_clause}
             """
             
-            # Выполняем пакетную вставку
-            execute_batch(cur, insert_query, values_list, page_size=10000)
+            # Подготавливаем данные с добавлением временных меток
+            values_with_timestamps = [
+                tuple(list(v) + [psycopg2.extensions.AsIs('CURRENT_TIMESTAMP'), 
+                                psycopg2.extensions.AsIs('CURRENT_TIMESTAMP'), 
+                                True])
+                for v in values_list
+            ]
+            
+            # Выполняем пакетную вставку с использованием execute_values (гораздо быстрее)
+            execute_values(cur, insert_query, values_with_timestamps, page_size=50000)
             
             conn.commit()
+            print(f"Обработано {len(values_list)} записей в таблице {table_name}")
     finally:
         conn.close()
 

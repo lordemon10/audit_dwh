@@ -72,7 +72,7 @@ def run_check(idm_file_path, ad_df, output_dir, db_name):
             print(f"Найдено нарушений: {len(report_df)}")
             
             # Сохраняем в БД
-            save_direct_ad_violations(report_df)
+            save_direct_ad_violations(db_name, report_df)
 
     except Exception as e:
         print(f"  Ошибка в Проверке 5: {e}")

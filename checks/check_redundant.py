@@ -8,7 +8,7 @@ def run_check(db_df, ad_df, db_info, output_dir):
     db_name = db_info["name"]
     is_prod_db = db_info["is_prod"]
     target_layer = db_info["ad_layer"]  # Например, 'EDW' или 'CBD'
-
+    
     print(f"Запуск проверки на дублирующие grant - ", end="")
 
     check_dir = os.path.join(output_dir, "check_redunant")
@@ -33,22 +33,54 @@ def run_check(db_df, ad_df, db_info, output_dir):
             g_layer = group["group_layer"]  # "EDW", "EDWT", "CBD"...
             g_schema = group["group_schema"]  # "cdm_analysis"
             g_privilege = group["group_privilege"]  # "read"
+            g_original_name = group.get("original_name", "")
 
             # ------------------------------------------------------------------
             # 🔥 КРИТИЧЕСКИЙ ФИЛЬТР КОНТУРА БАЗЫ ДАННЫХ
             # ------------------------------------------------------------------
-            # Группа должна подходить к нашей базе по базовому имени (например, EDW == EDW или EDWT содержит EDW)
-            if target_layer not in g_layer:
+            # Определяем базовый слой (без суффикса T)
+            base_target_layer = target_layer.rstrip('T')
+            base_g_layer = g_layer.rstrip('T')
+            
+            # Группа должна подходить к нашей базе по базовому имени
+            if base_target_layer != base_g_layer:
                 continue  # Пропускаем! Группа CBD не может давать доступ в базу EDW
 
+            # ------------------------------------------------------------------
             # Проверка прод / тест среды
-            if is_prod_db and g_layer.endswith("T"):
-                continue  # Пропускаем! Тестовая группа (с 'T') не работает на проде
+            # ------------------------------------------------------------------
+            if is_prod_db:
+                # Для прод-базы подходят только прод-группы (без 'T' в конце)
+                if g_layer.endswith("T"):
+                    continue
+            else:
+                # Для тестовой базы подходят:
+                # 1. Тестовые группы (с 'T') того же кластера
+                # 2. Универсальные группы dwht (для EDW/ODS/CBD тестов)
+                # Проверяем: если база тестовая, а группа продовая (без T) и не dwht - пропускаем
+                if not g_layer.endswith("T"):
+                    # Для ADB тестовых сред нужны группы ADBT
+                    if base_target_layer == 'ADB':
+                        continue
+                    # Для EDW/ODS/CBD тестовых сред допускаются группы с префиксом DWHT
+                    if base_target_layer in ['EDW', 'ODS', 'CBD']:
+                        if not g_original_name.upper().startswith('DWHT'):
+                            continue
 
             # ------------------------------------------------------------------
             # Проверка совпадения схемы и силы прав
             # ------------------------------------------------------------------
             if db_schema == g_schema:
+                # Фильтр привилегий в зависимости от слоя
+                # Для EDW, ODS, CBD учитываем только Read, All, Owner
+                # Для ADB учитываем Read, Owner, Write
+                allowed_privileges = ['read', 'all', 'owner']
+                if base_target_layer == 'ADB':
+                    allowed_privileges.append('write')
+                
+                if g_privilege not in allowed_privileges:
+                    continue
+                
                 if g_privilege in ["all", "owner"]:
                     has_duplicate_group = True
                 elif g_privilege == "read" and db_privilege == "select":
@@ -63,7 +95,7 @@ def run_check(db_df, ad_df, db_info, output_dir):
 
                 if has_duplicate_group:
                     # Берем сохраненное оригинальное красивое имя группы из AD
-                    covering_group_name = group["original_name"]
+                    covering_group_name = g_original_name
                     break
 
         if has_duplicate_group:

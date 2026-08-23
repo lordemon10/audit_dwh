@@ -10,6 +10,7 @@ def get_ad_users():
     Гарантирует сохранение заблокированных учетных записей без групп для корректной работы nologin.
     """
     server = Server(AD_CONFIG["server"], get_info=ALL)
+    # Добавлен префикс 'dwht ' для универсальных групп тестовых сред EDW/ODS/CBD
     target_prefixes = ("adb ", "cbd ", "dwht ", "adbt ", "edw ", "ods ")
 
     try:
@@ -104,30 +105,6 @@ def get_ad_users():
             if not df.empty:
                 df = df.drop_duplicates(subset=["sam_clean"])
                 print(f"Успешно загружено пользователей из AD: {len(df)}")
-
-                # Генерация отладочного файла только для тех, у кого ЕСТЬ ИТ-группы
-                #debug_rows = []
-                #for idx, row in df.iterrows():
-                #    for acc in row["accesses"]:
-                #        debug_rows.append(
-                #            {
-                #                "Логин": row["sam_clean"],
-                #                "ФИО": row["Name"],
-                #                "Учетка Активна": row["Enabled"],
-                #                "Группа AD (Оригинал)": acc["original_name"],
-                #                "Слой (Контур)": acc["group_layer"],
-                #                "Привилегия": acc["group_privilege"],
-                #                "Распознанная Схема БД": acc["group_schema"],
-                #            }
-                #        )
-
-                #os.makedirs("audit_results", exist_ok=True)
-                #if debug_rows:
-                #    pd.DataFrame(debug_rows).to_csv(
-                #        os.path.join("audit_results", "ad_debug_mapping.csv"),
-                #        index=False,
-                #        encoding="utf-8-sig",
-                #    )
 
             return df
 

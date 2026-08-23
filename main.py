@@ -1,6 +1,7 @@
 import os
 from config import AD_CONFIG, DB_LIST, SQL_QUERY, OUTPUT_DIR, IDM_FILE_PATH, AUDIT_DB
 from utils import get_ad_users, get_db_users, init_audit_tables
+from utils.mapping_db import init_mapping_table, build_mapping_from_db
 from checks.check_nologin import run_check as run_nologin_check
 from checks.check_grant import run_check as run_grant_check
 from checks.check_redundant import run_check as run_redundant_check
@@ -10,10 +11,18 @@ from checks.check_orphan_grants import run_check as run_orphan_grant_check
 import warnings
 warnings.filterwarnings("ignore", category=UserWarning)
 
+
 def main():
 
     # Инициализация таблиц аудита в БД
     init_audit_tables()
+    
+    # Инициализация и построение таблицы маппинга групп
+    print("=" * 60)
+    print("Инициализация таблицы маппинга групп доступа...")
+    init_mapping_table()
+    build_mapping_from_db()
+    print("=" * 60)
 
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 

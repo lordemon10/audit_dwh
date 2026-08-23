@@ -6,6 +6,7 @@ from checks.check_grant import run_check as run_grant_check
 from checks.check_redundant import run_check as run_redundant_check
 from checks.check_idm_dups import run_check as run_idm_check
 from checks.check_direct_ad import run_check as run_direct_ad_check
+from checks.check_orphan_grants import run_check as run_orphan_grant_check
 import warnings
 warnings.filterwarnings("ignore", category=UserWarning)
 
@@ -48,6 +49,13 @@ def main():
             )
             if db_df_schemas is not None:
                 run_redundant_check(db_df_schemas, ad_df, db_info, OUTPUT_DIR)
+
+            # Проверка №4: Сиротские гранты (прямые гранты без AD группы)
+            db_df_orphan = get_db_users(
+                db_info, query=SQL_QUERY["schema_grants"]
+            )
+            if db_df_orphan is not None:
+                run_orphan_grant_check(db_df_orphan, ad_df, db_info, OUTPUT_DIR)
 
             print("-" * 60)
     else:

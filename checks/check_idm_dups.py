@@ -3,7 +3,7 @@ import pandas as pd
 from utils import save_idm_dups_violations
 
 
-def run_check(idm_file_path, ad_df, output_dir):
+def run_check(idm_file_path, ad_df, output_dir, db_name):
     """Проверка №4: Поиск строк, где в 3-й колонке Synchronization, а в 4-й
 
     колонке пусто.
@@ -74,7 +74,7 @@ def run_check(idm_file_path, ad_df, output_dir):
             print(f"Найдено нарушений: {len(report_df)}")
             
             # Сохраняем в БД
-            save_idm_dups_violations(report_df)
+            save_idm_dups_violations(db_name, report_df)
 
     except Exception as e:
         print(f"  Ошибка в Проверке 4: {e}")

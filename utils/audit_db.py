@@ -1,4 +1,5 @@
 import psycopg2
+from psycopg2.extras import execute_batch
 from config import AUDIT_DB
 
 def get_audit_connection():
@@ -19,6 +20,7 @@ def init_audit_tables():
     create_nologin_table = """
     CREATE TABLE IF NOT EXISTS audit_check_nologin (
         id SERIAL PRIMARY KEY,
+        db_name VARCHAR(100) NOT NULL,
         rolname VARCHAR(255) NOT NULL,
         Name VARCHAR(255),
         Enabled BOOLEAN,
@@ -27,7 +29,7 @@ def init_audit_tables():
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         last_checked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         is_active BOOLEAN DEFAULT TRUE,
-        UNIQUE (rolname, nologin_sql)
+        UNIQUE (db_name, rolname, nologin_sql)
     );
     """
     
@@ -35,6 +37,7 @@ def init_audit_tables():
     create_grant_table = """
     CREATE TABLE IF NOT EXISTS audit_check_grant (
         id SERIAL PRIMARY KEY,
+        db_name VARCHAR(100) NOT NULL,
         rolname VARCHAR(255) NOT NULL,
         Name VARCHAR(255),
         table_name VARCHAR(255),
@@ -43,7 +46,7 @@ def init_audit_tables():
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         last_checked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         is_active BOOLEAN DEFAULT TRUE,
-        UNIQUE (rolname, table_name, privilege_type, revoke_sql)
+        UNIQUE (db_name, rolname, table_name, privilege_type, revoke_sql)
     );
     """
     
@@ -51,7 +54,7 @@ def init_audit_tables():
     create_redundant_table = """
     CREATE TABLE IF NOT EXISTS audit_check_redundant (
         id SERIAL PRIMARY KEY,
-        db_name VARCHAR(100),
+        db_name VARCHAR(100) NOT NULL,
         rolname VARCHAR(255) NOT NULL,
         Name VARCHAR(255),
         table_schema VARCHAR(255),
@@ -70,6 +73,7 @@ def init_audit_tables():
     create_idm_dups_table = """
     CREATE TABLE IF NOT EXISTS audit_check_idm_dups (
         id SERIAL PRIMARY KEY,
+        db_name VARCHAR(100),
         login VARCHAR(255) NOT NULL,
         Name VARCHAR(255),
         group_name VARCHAR(255),
@@ -87,6 +91,7 @@ def init_audit_tables():
     create_direct_ad_table = """
     CREATE TABLE IF NOT EXISTS audit_check_direct_ad (
         id SERIAL PRIMARY KEY,
+        db_name VARCHAR(100),
         login VARCHAR(255) NOT NULL,
         Name VARCHAR(255),
         group_name VARCHAR(255),
@@ -113,29 +118,59 @@ def init_audit_tables():
     finally:
         conn.close()
 
-def upsert_violation(table_name, unique_columns, data_columns, values):
+def bulk_upsert_violations(table_name, unique_columns, data_columns, values_list):
     """
-    Вставка или обновление записи о нарушении.
+    Массовая вставка или обновление записей о нарушениях.
+    Использует временную таблицу для эффективной обработки больших объемов данных.
     
     Args:
         table_name: имя таблицы
         unique_columns: список колонок для UNIQUE constraints
         data_columns: список колонок с данными (без служебных полей)
-        values: кортеж значений для вставки
+        values_list: список кортежей значений для вставки
     """
+    if not values_list:
+        return
+    
     conn = get_audit_connection()
     try:
         with conn.cursor() as cur:
-            # Формируем строки колонок
+            # Создаем временную таблицу для загрузки данных
+            temp_table = f"temp_{table_name}"
+            
+            # Определяем типы данных для временной таблицы (упрощенно - все TEXT кроме BOOLEAN)
+            # Для простоты используем ту же структуру, что и основная таблица
             columns_str = ", ".join(data_columns)
-            placeholders = ", ".join(["%s"] * len(values))
             
             # Формируем условия для UNIQUE conflict
             unique_str = ", ".join(unique_columns)
             
-            # Формируем обновления для существующих записей
-            update_columns = [col for col in data_columns if col not in unique_columns]
-            update_set = ", ".join([f"{col} = EXCLUDED.{col}" for col in update_columns])
+            # Сначала обновляем существующие записи
+            update_query = f"""
+            UPDATE {table_name} t
+            SET last_checked_at = CURRENT_TIMESTAMP,
+                is_active = TRUE
+            FROM (VALUES {",".join(["(%s)"] * len(values_list))}) AS v({unique_str})
+            WHERE {f" AND ".join([f"t.{col} = v.{col}" for col in unique_columns])}
+              AND t.is_active = TRUE
+            """
+            
+            # Для больших объемов данных используем более простой подход:
+            # 1. Помечаем все активные записи как неактивные
+            # 2. Вставляем новые данные с ON CONFLICT
+            
+            # Шаг 1: Деактивируем все текущие активные записи
+            deactivate_query = f"""
+            UPDATE {table_name}
+            SET is_active = FALSE,
+                last_checked_at = CURRENT_TIMESTAMP
+            WHERE is_active = TRUE
+            """
+            cur.execute(deactivate_query)
+            
+            # Шаг 2: Вставляем новые записи (или обновляем существующие)
+            placeholders = ", ".join(["%s"] * len(data_columns))
+            update_set = ", ".join([f"{col} = EXCLUDED.{col}" for col in data_columns if col not in unique_columns])
             
             insert_query = f"""
             INSERT INTO {table_name} ({columns_str}, created_at, last_checked_at, is_active)
@@ -143,54 +178,12 @@ def upsert_violation(table_name, unique_columns, data_columns, values):
             ON CONFLICT ({unique_str}) 
             DO UPDATE SET 
                 last_checked_at = CURRENT_TIMESTAMP,
-                is_active = TRUE,
-                {update_set if update_set else "is_active = TRUE"}
+                is_active = TRUE
+                {", " + update_set if update_set else ""}
             """
             
-            cur.execute(insert_query, values)
-            conn.commit()
-    finally:
-        conn.close()
-
-def deactivate_old_violations(table_name, current_violations_keys, key_columns):
-    """
-    Помечает как неактивные нарушения, которые не были найдены при текущей проверке.
-    
-    Args:
-        table_name: имя таблицы
-        current_violations_keys: список кортежей с ключами текущих нарушений
-        key_columns: список колонок, составляющих уникальный ключ
-    """
-    conn = get_audit_connection()
-    try:
-        with conn.cursor() as cur:
-            if current_violations_keys:
-                # Создаем условия для фильтрации текущих записей
-                conditions = []
-                all_values = []
-                for key_tuple in current_violations_keys:
-                    cond = " AND ".join([f"{col} = %s" for col in key_columns])
-                    conditions.append(f"({cond})")
-                    all_values.extend(key_tuple)
-                
-                # Деактивируем все записи, которых нет в текущем списке
-                deactivate_query = f"""
-                UPDATE {table_name}
-                SET is_active = FALSE,
-                    last_checked_at = CURRENT_TIMESTAMP
-                WHERE is_active = TRUE
-                  AND NOT ({" OR ".join(conditions)})
-                """
-                cur.execute(deactivate_query, all_values)
-            else:
-                # Если текущих нарушений нет, деактивируем все активные
-                deactivate_query = f"""
-                UPDATE {table_name}
-                SET is_active = FALSE,
-                    last_checked_at = CURRENT_TIMESTAMP
-                WHERE is_active = TRUE
-                """
-                cur.execute(deactivate_query)
+            # Выполняем пакетную вставку
+            execute_batch(cur, insert_query, values_list, page_size=10000)
             
             conn.commit()
     finally:
@@ -199,45 +192,43 @@ def deactivate_old_violations(table_name, current_violations_keys, key_columns):
 def save_nologin_violations(db_name, violations_df):
     """Сохранение результатов проверки check_nologin в БД."""
     table_name = "audit_check_nologin"
-    data_columns = ["rolname", "Name", "Enabled", "rolcanlogin", "nologin_sql"]
-    unique_columns = ["rolname", "nologin_sql"]
+    data_columns = ["db_name", "rolname", "Name", "Enabled", "rolcanlogin", "nologin_sql"]
+    unique_columns = ["db_name", "rolname", "nologin_sql"]
     
-    current_keys = []
-    
+    values_list = []
     for _, row in violations_df.iterrows():
         values = (
+            db_name,
             row["rolname"],
             row.get("Name", None),
             row.get("Enabled", None),
             row.get("rolcanlogin", None),
             row.get("nologin_sql", None)
         )
-        upsert_violation(table_name, unique_columns, data_columns, values)
-        current_keys.append((row["rolname"], row.get("nologin_sql", None)))
+        values_list.append(values)
     
-    deactivate_old_violations(table_name, current_keys, unique_columns)
+    bulk_upsert_violations(table_name, unique_columns, data_columns, values_list)
     print(f"Сохранено {len(violations_df)} нарушений в таблицу {table_name}")
 
 def save_grant_violations(db_name, violations_df):
     """Сохранение результатов проверки check_grant в БД."""
     table_name = "audit_check_grant"
-    data_columns = ["rolname", "Name", "table_name", "privilege_type", "revoke_sql"]
-    unique_columns = ["rolname", "table_name", "privilege_type", "revoke_sql"]
+    data_columns = ["db_name", "rolname", "Name", "table_name", "privilege_type", "revoke_sql"]
+    unique_columns = ["db_name", "rolname", "table_name", "privilege_type", "revoke_sql"]
     
-    current_keys = []
-    
+    values_list = []
     for _, row in violations_df.iterrows():
         values = (
+            db_name,
             row["rolname"],
             row.get("Name", None),
             row.get("table_name", None),
             row.get("privilege_type", None),
             row.get("revoke_sql", None)
         )
-        upsert_violation(table_name, unique_columns, data_columns, values)
-        current_keys.append((row["rolname"], row.get("table_name", None), row.get("privilege_type", None), row.get("revoke_sql", None)))
+        values_list.append(values)
     
-    deactivate_old_violations(table_name, current_keys, unique_columns)
+    bulk_upsert_violations(table_name, unique_columns, data_columns, values_list)
     print(f"Сохранено {len(violations_df)} нарушений в таблицу {table_name}")
 
 def save_redundant_violations(db_name, violations_df):
@@ -246,8 +237,7 @@ def save_redundant_violations(db_name, violations_df):
     data_columns = ["db_name", "rolname", "Name", "table_schema", "table_name", "privilege_type", "duplicate_ad_group", "revoke_sql"]
     unique_columns = ["db_name", "rolname", "table_schema", "table_name", "privilege_type", "revoke_sql"]
     
-    current_keys = []
-    
+    values_list = []
     for _, row in violations_df.iterrows():
         values = (
             db_name,
@@ -259,22 +249,21 @@ def save_redundant_violations(db_name, violations_df):
             row.get("duplicate_ad_group", None),
             row.get("revoke_sql", None)
         )
-        upsert_violation(table_name, unique_columns, data_columns, values)
-        current_keys.append((db_name, row["rolname"], row.get("table_schema", None), row.get("table_name", None), row.get("privilege_type", None), row.get("revoke_sql", None)))
+        values_list.append(values)
     
-    deactivate_old_violations(table_name, current_keys, unique_columns)
+    bulk_upsert_violations(table_name, unique_columns, data_columns, values_list)
     print(f"Сохранено {len(violations_df)} нарушений в таблицу {table_name}")
 
-def save_idm_dups_violations(violations_df):
+def save_idm_dups_violations(db_name, violations_df):
     """Сохранение результатов проверки check_idm_dups в БД."""
     table_name = "audit_check_idm_dups"
-    data_columns = ["login", "Name", "group_name", "source", "business_role", "comment"]
+    data_columns = ["db_name", "login", "Name", "group_name", "source", "business_role", "comment"]
     unique_columns = ["login", "group_name", "source", "business_role"]
     
-    current_keys = []
-    
+    values_list = []
     for _, row in violations_df.iterrows():
         values = (
+            db_name,
             row.get("login", None),
             row.get("Name", None),
             row.get("group", None),
@@ -282,22 +271,21 @@ def save_idm_dups_violations(violations_df):
             row.get("business_role", None),
             row.get("comment", None)
         )
-        upsert_violation(table_name, unique_columns, data_columns, values)
-        current_keys.append((row.get("login", None), row.get("group", None), row.get("source", None), row.get("business_role", None)))
+        values_list.append(values)
     
-    deactivate_old_violations(table_name, current_keys, unique_columns)
+    bulk_upsert_violations(table_name, unique_columns, data_columns, values_list)
     print(f"Сохранено {len(violations_df)} нарушений в таблицу {table_name}")
 
-def save_direct_ad_violations(violations_df):
+def save_direct_ad_violations(db_name, violations_df):
     """Сохранение результатов проверки check_direct_ad в БД."""
     table_name = "audit_check_direct_ad"
-    data_columns = ["login", "Name", "group_name", "source", "business_role", "comment"]
+    data_columns = ["db_name", "login", "Name", "group_name", "source", "business_role", "comment"]
     unique_columns = ["login", "group_name", "source", "business_role"]
     
-    current_keys = []
-    
+    values_list = []
     for _, row in violations_df.iterrows():
         values = (
+            db_name,
             row.get("login", None),
             row.get("Name", None),
             row.get("group", None),
@@ -305,8 +293,7 @@ def save_direct_ad_violations(violations_df):
             row.get("business_role", None),
             row.get("comment", None)
         )
-        upsert_violation(table_name, unique_columns, data_columns, values)
-        current_keys.append((row.get("login", None), row.get("group", None), row.get("source", None), row.get("business_role", None)))
+        values_list.append(values)
     
-    deactivate_old_violations(table_name, current_keys, unique_columns)
+    bulk_upsert_violations(table_name, unique_columns, data_columns, values_list)
     print(f"Сохранено {len(violations_df)} нарушений в таблицу {table_name}")

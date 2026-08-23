@@ -324,6 +324,12 @@ def update_ad_groups_from_cache(ad_df):
     """
     Обновляет поля ad_group_* в таблице маппинга на основе выгруженных AD-групп.
     
+    Логика строгого соответствия:
+    1. Извлекаем префикс из role_prefix_* (например all_avfeskov → avfeskov)
+    2. Формируем ожидаемое имя AD-группы: "{LAYER} {PRIVILEGE} {PREFIX}"
+    3. Проверяем существование группы в выгрузке AD
+    4. Заполняем ТОЛЬКО если группа найдена
+    
     Args:
         ad_df: DataFrame с данными пользователей AD (результат get_ad_users())
                Должен содержать колонку 'accesses' со списком групп для каждого пользователя
@@ -368,6 +374,7 @@ def update_ad_groups_from_cache(ad_df):
             # Получаем все активные записи маппинга
             cur.execute("""
                 SELECT id, db_name, ad_layer, schema_name,
+                       schema_owner_role,
                        role_prefix_all, role_prefix_owner, role_prefix_write, role_prefix_read
                 FROM audit_mapping_group
                 WHERE is_active = TRUE
@@ -382,10 +389,19 @@ def update_ad_groups_from_cache(ad_df):
                 db_name = mapping[1]
                 ad_layer = mapping[2]
                 schema_name = mapping[3]
-                role_all = mapping[4]
-                role_owner = mapping[5]
-                role_write = mapping[6]
-                role_read = mapping[7]
+                schema_owner_role = mapping[4]
+                role_all = mapping[5]
+                role_owner = mapping[6]
+                role_write = mapping[7]
+                role_read = mapping[8]
+                
+                # Извлекаем префикс из роли владельца схемы
+                # Это основной префикс для формирования имен AD-групп
+                prefix = extract_role_prefix(schema_owner_role)
+                
+                if not prefix:
+                    # Схема не имеет стандартного префикса - пропускаем
+                    continue
                 
                 # Определяем базовый слой
                 base_layer = ad_layer.rstrip('T')
@@ -408,42 +424,43 @@ def update_ad_groups_from_cache(ad_df):
                 # Проверяем и обновляем AD-группы
                 updates = {}
                 
+                # Формируем имя AD-группы на основе ПРЕФИКСА роли, а не имени схемы
                 # Для EDW/ODS/CBD: All группа соответствует роли all_<prefix>
                 if role_all and base_layer in ['EDW', 'ODS', 'CBD']:
-                    ad_group_name = f"{group_prefix} All {schema_name}".lower()
+                    ad_group_name = f"{group_prefix} All {prefix}".lower()
                     if ad_group_name in all_ad_groups:
                         updates['ad_group_all'] = ad_group_name
-                        print(f"  Найдена AD-группа '{ad_group_name}' для роли {role_all}")
+                        print(f"  Найдена AD-группа '{ad_group_name}' для роли {role_all} (схема {schema_name})")
                 
                 # Для ADB: Owner группа соответствует роли owner_<prefix>
                 if role_owner:
                     if base_layer == 'ADB':
-                        ad_group_name = f"{ad_layer} Owner {schema_name}".lower()
+                        ad_group_name = f"{ad_layer} Owner {prefix}".lower()
                     else:
                         # Для EDW/ODS/CBD owner роль обычно совпадает с all
-                        ad_group_name = f"{group_prefix} All {schema_name}".lower()
+                        ad_group_name = f"{group_prefix} All {prefix}".lower()
                     
                     if ad_group_name in all_ad_groups:
                         updates['ad_group_owner'] = ad_group_name
-                        print(f"  Найдена AD-группа '{ad_group_name}' для роли {role_owner}")
+                        print(f"  Найдена AD-группа '{ad_group_name}' для роли {role_owner} (схема {schema_name})")
                 
                 # Для ADB: Write группа
                 if role_write and base_layer == 'ADB':
-                    ad_group_name = f"{ad_layer} Write {schema_name}".lower()
+                    ad_group_name = f"{ad_layer} Write {prefix}".lower()
                     if ad_group_name in all_ad_groups:
                         updates['ad_group_write'] = ad_group_name
-                        print(f"  Найдена AD-группа '{ad_group_name}' для роли {role_write}")
+                        print(f"  Найдена AD-группа '{ad_group_name}' для роли {role_write} (схема {schema_name})")
                 
                 # Read группа для всех слоев
                 if role_read:
                     if base_layer == 'ADB':
-                        ad_group_name = f"{ad_layer} Read {schema_name}".lower()
+                        ad_group_name = f"{ad_layer} Read {prefix}".lower()
                     else:
-                        ad_group_name = f"{group_prefix} Read {schema_name}".lower()
+                        ad_group_name = f"{group_prefix} Read {prefix}".lower()
                     
                     if ad_group_name in all_ad_groups:
                         updates['ad_group_read'] = ad_group_name
-                        print(f"  Найдена AD-группа '{ad_group_name}' для роли {role_read}")
+                        print(f"  Найдена AD-группа '{ad_group_name}' для роли {role_read} (схема {schema_name})")
                 
                 # Выполняем обновление если есть совпадения
                 if updates:

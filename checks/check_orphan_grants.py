@@ -131,10 +131,11 @@ def run_check(db_df, ad_df, db_info, output_dir):
                 expected_ad_group = mapping_entry.get('ad_group_all') or mapping_entry.get('ad_group_owner')
             
             # Если ожидаемая AD-группа найдена в маппинге, проверяем состоит ли в ней пользователь
-            if expected_ad_group:
+            if expected_ad_group and pd.notna(expected_ad_group):
+                expected_ad_group_lower = str(expected_ad_group).lower()
                 for group in user_groups:
-                    g_original_name = group.get("original_name", "").lower()
-                    if g_original_name == expected_ad_group.lower():
+                    g_original_name = group.get("original_name", "")
+                    if g_original_name and g_original_name.lower() == expected_ad_group_lower:
                         has_valid_group = True
                         break
         

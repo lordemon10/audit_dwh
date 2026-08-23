@@ -41,6 +41,7 @@ def run_check(db_df, ad_df, db_name, output_dir):
         report_columns = [
             "rolname",
             "Name",
+            "table_schema",
             "table_name",
             "privilege_type",
             "revoke_sql",

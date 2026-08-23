@@ -43,13 +43,14 @@ def init_audit_tables():
                 db_name VARCHAR(100) NOT NULL,
                 rolname VARCHAR(255) NOT NULL,
                 Name VARCHAR(255),
+                table_schema VARCHAR(255),
                 table_name VARCHAR(255),
                 privilege_type VARCHAR(50),
                 revoke_sql TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 last_checked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 is_active BOOLEAN DEFAULT TRUE,
-                UNIQUE (db_name, rolname, table_name, privilege_type, revoke_sql)
+                UNIQUE (db_name, rolname, table_schema, table_name, privilege_type, revoke_sql)
             );
             """
             
@@ -270,8 +271,8 @@ def save_nologin_violations(db_name, violations_df):
 def save_grant_violations(db_name, violations_df):
     """Сохранение результатов проверки check_grant в БД."""
     table_name = "audit_check_grant"
-    data_columns = ["db_name", "rolname", "Name", "table_name", "privilege_type", "revoke_sql"]
-    unique_columns = ["db_name", "rolname", "table_name", "privilege_type", "revoke_sql"]
+    data_columns = ["db_name", "rolname", "Name", "table_schema", "table_name", "privilege_type", "revoke_sql"]
+    unique_columns = ["db_name", "rolname", "table_schema", "table_name", "privilege_type", "revoke_sql"]
     
     values_list = []
     for _, row in violations_df.iterrows():
@@ -279,6 +280,7 @@ def save_grant_violations(db_name, violations_df):
             db_name,
             row["rolname"],
             row.get("Name", None),
+            row.get("table_schema", None),
             row.get("table_name", None),
             row.get("privilege_type", None),
             row.get("revoke_sql", None)

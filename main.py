@@ -1,5 +1,5 @@
 import os
-from config import AD_CONFIG, DB_LIST, SQL_QUERY, OUTPUT_DIR, IDM_FILE_PATH
+from config import AD_CONFIG, DB_LIST, SQL_QUERY, OUTPUT_DIR, IDM_FILE_PATH, AUDIT_DB
 from utils import get_ad_users, get_db_users, init_audit_tables
 from checks.check_nologin import run_check as run_nologin_check
 from checks.check_grant import run_check as run_grant_check

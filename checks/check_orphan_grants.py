@@ -41,6 +41,9 @@ def run_check(db_df, ad_df, db_info, output_dir):
     is_prod_db = db_info.get("is_prod", False)
     target_layer = db_info.get("ad_layer", get_cluster_name(db_name))
     
+    # Определяем базовый слой (без суффикса T)
+    base_target_layer = target_layer.rstrip('T')
+    
     print(f"Запуск проверки на сиротские гранты для БД: {db_name} (Кластер: {target_layer})")
 
     # Фильтруем только активные записи AD
@@ -67,6 +70,17 @@ def run_check(db_df, ad_df, db_info, output_dir):
         # Определяем ключевое слово привилегии для поиска группы
         priv_keyword = map_privilege_to_group_keyword(db_privilege)
         
+        # Фильтр привилегий в зависимости от слоя
+        # Для EDW, ODS, CBD учитываем только Read, All, Owner
+        # Для ADB учитываем Read, Owner, Write
+        allowed_privileges = ['read', 'all', 'owner']
+        if base_target_layer == 'ADB':
+            allowed_privileges.append('write')
+        
+        # Если привилегия не входит в разрешенные для этого слоя - пропускаем
+        if priv_keyword.lower() not in [p.lower() for p in allowed_privileges]:
+            continue
+        
         # Ищем хотя бы одну группу, которая подтверждает этот грант
         has_valid_group = False
         
@@ -74,14 +88,32 @@ def run_check(db_df, ad_df, db_info, output_dir):
             g_layer = group.get("group_layer", "")  # "EDW", "EDWT", "CBD"...
             g_schema = group.get("group_schema", "")  # "core", "cdm_analysis"...
             g_privilege = group.get("group_privilege", "")  # "read", "write"...
+            g_original_name = group.get("original_name", "")
             
-            # Фильтр по кластеру/слою (аналогично check_redundant)
-            if target_layer not in g_layer:
+            # Определяем базовый слой группы
+            base_g_layer = g_layer.rstrip('T')
+            
+            # Фильтр по кластеру/слою
+            if base_target_layer != base_g_layer:
                 continue
             
             # Фильтр прод/тест
-            if is_prod_db and g_layer.endswith("T"):
-                continue
+            if is_prod_db:
+                # Для прод-базы подходят только прод-группы (без 'T' в конце)
+                if g_layer.endswith("T"):
+                    continue
+            else:
+                # Для тестовой базы подходят:
+                # 1. Тестовые группы (с 'T') того же кластера
+                # 2. Универсальные группы dwht (для EDW/ODS/CBD тестов)
+                if not g_layer.endswith("T"):
+                    # Для ADB тестовых сред нужны группы ADBT
+                    if base_target_layer == 'ADB':
+                        continue
+                    # Для EDW/ODS/CBD тестовых сред допускаются группы с префиксом DWHT
+                    if base_target_layer in ['EDW', 'ODS', 'CBD']:
+                        if not g_original_name.upper().startswith('DWHT'):
+                            continue
             
             # Проверка совпадения схемы и привилегии
             if g_schema.lower() == db_schema and g_privilege.lower() == db_privilege:

@@ -61,16 +61,19 @@ def init_mapping_table():
         conn.close()
 
 
-def build_mapping_from_db():
+def build_mapping_from_db(ad_df=None):
     """
     Построение таблицы маппинга на основе данных из всех БД.
     
-    Логика:
+    Строгая логика:
     1. Для каждой БД из DB_LIST подключаемся и получаем список схем с их владельцами
-    2. Определяем префикс роли владельца (например, all_bcapp -> bcapp)
-    3. Ищем соответствующие роли с префиксами read_<prefix>, write_<prefix>, owner_<prefix>
-    4. Проверяем существование AD-групп для этих ролей
-    5. Сохраняем маппинг в таблицу
+    2. Извлекаем префикс из роли владельца ТОЛЬКО если она начинается с all_, read_, owner_ и т.д.
+    3. ПРЯМЫМ ЗАПРОСОМ проверяем существование ролей all_<prefix>, read_<prefix>, owner_<prefix>, write_<prefix>
+    4. Заполняем ТОЛЬКО реально существующие роли
+    5. Если передан ad_df - сразу обновляем AD-группы
+    
+    Args:
+        ad_df: DataFrame с данными AD (опционально)
     """
     
     conn = get_audit_connection()
@@ -111,15 +114,26 @@ def build_mapping_from_db():
                     schemas = db_cur.fetchall()
                     
                     for schema_name, owner_role in schemas:
-                        # Извлекаем префикс из имени роли владельца
-                        # Например: all_bcapp -> bcapp, read_core -> core
+                        # СТРОГОЕ правило: извлекаем префикс только если роль начинается с известного префикса
                         prefix = extract_role_prefix(owner_role)
                         
                         if not prefix:
+                            # Владелец схемы не соответствует шаблону (например просто "avfeskov")
+                            # Пропускаем эту схему - она не управляется через нашу систему групп
+                            print(f"  Схема '{schema_name}' с владельцем '{owner_role}' пропущена (не соответствует шаблону)")
                             continue
                         
                         # Определяем ключ для уникальности записи
                         mapping_key = (db_name, schema_name.lower())
+                        
+                        # Формируем потенциальные имена ролей на основе префикса
+                        # Но НЕ заполняем их пока не проверим существование в БД
+                        potential_roles = {
+                            "all": f"all_{prefix}",
+                            "read": f"read_{prefix}",
+                            "owner": f"owner_{prefix}",
+                            "write": f"write_{prefix}"
+                        }
                         
                         if mapping_key not in role_mappings:
                             role_mappings[mapping_key] = {
@@ -128,22 +142,23 @@ def build_mapping_from_db():
                                 "ad_layer": ad_layer,
                                 "schema_name": schema_name.lower(),
                                 "schema_owner_role": owner_role,
-                                "role_prefix_all": f"all_{prefix}" if ad_layer in ['EDW', 'ODS', 'CBD', 'DWHT EDW', 'DWHT ODS'] else None,
+                                "role_prefix_all": None,      # Будет заполнено только если роль существует
                                 "ad_group_all": None,
-                                "role_prefix_owner": f"owner_{prefix}" if ad_layer == 'ADB' else f"all_{prefix}",
+                                "role_prefix_owner": None,    # Будет заполнено только если роль существует
                                 "ad_group_owner": None,
-                                "role_prefix_write": f"write_{prefix}" if ad_layer == 'ADB' else None,
+                                "role_prefix_write": None,    # Будет заполнено только если роль существует
                                 "ad_group_write": None,
-                                "role_prefix_read": f"read_{prefix}",
+                                "role_prefix_read": None,     # Будет заполнено только если роль существует
                                 "ad_group_read": None,
+                                "potential_roles": potential_roles  # Временное хранение для проверки
                             }
                             
         except Exception as e:
             print(f"Ошибка подключения к БД {db_name}: {e}")
             continue
     
-    # Теперь проверяем existence ролей в каждой БД и обновляем маппинг
-    print("\nПроверка существования ролей в БД...")
+    # Теперь ПРЯМЫМ ЗАПРОСОМ проверяем existence ролей в каждой БД
+    print("\nПроверка существования ролей в БД (прямые запросы)...")
     
     for db_info in DB_LIST:
         db_name = db_info["name"]
@@ -165,19 +180,10 @@ def build_mapping_from_db():
                             continue
                         
                         schema_name = mapping["schema_name"]
+                        potential_roles = mapping.get("potential_roles", {})
                         
-                        # Проверяем существование ролей
-                        roles_to_check = []
-                        if mapping["role_prefix_all"]:
-                            roles_to_check.append(("all", mapping["role_prefix_all"]))
-                        if mapping["role_prefix_owner"]:
-                            roles_to_check.append(("owner", mapping["role_prefix_owner"]))
-                        if mapping["role_prefix_write"]:
-                            roles_to_check.append(("write", mapping["role_prefix_write"]))
-                        if mapping["role_prefix_read"]:
-                            roles_to_check.append(("read", mapping["role_prefix_read"]))
-                        
-                        for priv_type, role_name in roles_to_check:
+                        # Проверяем каждую потенциальную роль прямым запросом
+                        for priv_type, role_name in potential_roles.items():
                             if not role_name:
                                 continue
                             
@@ -186,7 +192,7 @@ def build_mapping_from_db():
                             """, (role_name,))
                             
                             if db_cur.fetchone():
-                                # Роль существует, обновляем маппинг
+                                # Роль РЕАЛЬНО СУЩЕСТВУЕТ - заполняем поле
                                 if priv_type == "all":
                                     mapping["role_prefix_all"] = role_name
                                 elif priv_type == "owner":
@@ -195,7 +201,12 @@ def build_mapping_from_db():
                                     mapping["role_prefix_write"] = role_name
                                 elif priv_type == "read":
                                     mapping["role_prefix_read"] = role_name
+                                print(f"  Найдена роль {role_name} для схемы {schema_name}")
                         
+                        # Удаляем временное поле potential_roles
+                        if "potential_roles" in mapping:
+                            del mapping["potential_roles"]
+                            
         except Exception as e:
             print(f"Ошибка проверки ролей в БД {db_name}: {e}")
             continue
@@ -209,7 +220,18 @@ def build_mapping_from_db():
             cur.execute("UPDATE audit_mapping_group SET is_active = FALSE, last_updated_at = CURRENT_TIMESTAMP WHERE is_active = TRUE")
             
             # Вставляем новые записи
+            inserted_count = 0
             for mapping_key, mapping in role_mappings.items():
+                # Пропускаем если нет ни одной реальной роли
+                if not any([
+                    mapping["role_prefix_all"],
+                    mapping["role_prefix_owner"],
+                    mapping["role_prefix_write"],
+                    mapping["role_prefix_read"]
+                ]):
+                    print(f"  Пропущена схема {mapping['schema_name']} - нет ни одной реальной роли")
+                    continue
+                
                 insert_query = """
                 INSERT INTO audit_mapping_group (
                     db_name, is_prod, ad_layer, schema_name, schema_owner_role,
@@ -250,16 +272,25 @@ def build_mapping_from_db():
                     mapping["role_prefix_read"],
                     mapping["ad_group_read"]
                 ))
+                inserted_count += 1
             
             conn.commit()
-        print(f"Успешно сохранено {len(role_mappings)} записей маппинга.")
+        print(f"Успешно сохранено {inserted_count} записей маппинга.")
     finally:
         conn.close()
+    
+    # Если передан ad_df - сразу обновляем AD-группы
+    if ad_df is not None:
+        print("\nОбновление AD-групп из переданного DataFrame...")
+        update_ad_groups_from_cache(ad_df)
 
 
 def extract_role_prefix(role_name):
     """
-    Извлекает префикс из имени роли.
+    Извлекает префикс из имени роли владельца схемы.
+    
+    Строгое правило: префикс извлекается ТОЛЬКО если роль начинается с 
+    известного префикса (all_, read_, write_, owner_, unspec_).
     
     Примеры:
     - all_bcapp -> bcapp
@@ -284,22 +315,53 @@ def extract_role_prefix(role_name):
             if extracted:
                 return extracted
     
-    # Если роль не начинается с известного префикса, возможно это имя схемы
-    # Возвращаем как есть если не содержит специальных символов
-    if not any(c in role_lower for c in ["_", "-", "."]):
-        return role_lower
-    
+    # Если роль не начинается с известного префикса - возвращаем None
+    # Это означает что схема не управляется через нашу систему групп
     return None
 
 
-def update_ad_groups_from_cache(ad_groups_set):
+def update_ad_groups_from_cache(ad_df):
     """
     Обновляет поля ad_group_* в таблице маппинга на основе выгруженных AD-групп.
     
     Args:
-        ad_groups_set: множество имен AD-групп (в нижнем регистре)
+        ad_df: DataFrame с данными пользователей AD (результат get_ad_users())
+               Должен содержать колонку 'accesses' со списком групп для каждого пользователя
     """
+    if ad_df is None or ad_df.empty:
+        print("AD DataFrame пуст, пропускаем обновление AD-групп.")
+        return
+    
     conn = get_audit_connection()
+    
+    # Собираем ВСЕ уникальные имена AD-групп из всех пользователей
+    all_ad_groups = set()
+    for accesses in ad_df.get('accesses', []):
+        if isinstance(accesses, list):
+            for access in accesses:
+                if isinstance(access, dict):
+                    group_name = access.get('original_name', '')
+                    if group_name:
+                        all_ad_groups.add(group_name.lower())
+    
+    # Альтернативный способ: проходим по всему DataFrame
+    if all_ad_groups:
+        print(f"Найдено {len(all_ad_groups)} уникальных AD-групп для маппинга.")
+    else:
+        # Если первый способ не сработал, пробуем развернуть accesses
+        exploded = ad_df.explode('accesses')
+        for _, row in exploded.iterrows():
+            accesses = row.get('accesses', [])
+            if isinstance(accesses, dict):
+                group_name = accesses.get('original_name', '')
+                if group_name:
+                    all_ad_groups.add(group_name.lower())
+        
+        if all_ad_groups:
+            print(f"Найдено {len(all_ad_groups)} уникальных AD-групп для маппинга (через explode).")
+        else:
+            print("Не удалось извлечь AD-группы из DataFrame.")
+            return
     
     try:
         with conn.cursor() as cur:
@@ -325,53 +387,63 @@ def update_ad_groups_from_cache(ad_groups_set):
                 role_write = mapping[6]
                 role_read = mapping[7]
                 
-                # Формируем возможные имена AD-групп на основе ролей
-                # Логика аналогична той что в bash-скрипте
-                
                 # Определяем базовый слой
                 base_layer = ad_layer.rstrip('T')
                 
-                # Для тестовых сред EDW/ODS/CBD используем префикс DWHT
-                group_prefix = base_layer
-                if not ad_layer.endswith('T') and base_layer in ['EDW', 'ODS', 'CBD']:
-                    # Прод группа
-                    pass
-                elif ad_layer.endswith('T') or base_layer in ['EDW', 'ODS', 'CBD']:
-                    # Тестовая группа
-                    if base_layer in ['EDW', 'ODS', 'CBD']:
-                        group_prefix = 'DWHT ' + base_layer
+                # Формируем префикс группы в зависимости от слоя и контура
+                # Для EDW/ODS/CBD прод: "EDW", "ODS", "CBD"
+                # Для EDW/ODS/CBD тест: "DWHT EDW", "DWHT ODS", "DWHT CBD"
+                # Для ADB прод: "ADB"
+                # Для ADB тест: "ADBT"
+                if ad_layer.endswith('T'):
+                    # Тестовая среда
+                    if base_layer == 'ADB':
+                        group_prefix = ad_layer  # "ADBT"
                     else:
-                        group_prefix = ad_layer
+                        group_prefix = f"DWHT {base_layer}"  # "DWHT EDW"
+                else:
+                    # Продовая среда
+                    group_prefix = ad_layer  # "EDW", "ODS", "CBD", "ADB"
                 
                 # Проверяем и обновляем AD-группы
                 updates = {}
                 
-                if role_all:
-                    # Формируем имя группы: "<LAYER> All <schema>"
+                # Для EDW/ODS/CBD: All группа соответствует роли all_<prefix>
+                if role_all and base_layer in ['EDW', 'ODS', 'CBD']:
                     ad_group_name = f"{group_prefix} All {schema_name}".lower()
-                    if ad_group_name in ad_groups_set:
+                    if ad_group_name in all_ad_groups:
                         updates['ad_group_all'] = ad_group_name
+                        print(f"  Найдена AD-группа '{ad_group_name}' для роли {role_all}")
                 
+                # Для ADB: Owner группа соответствует роли owner_<prefix>
                 if role_owner:
                     if base_layer == 'ADB':
                         ad_group_name = f"{ad_layer} Owner {schema_name}".lower()
                     else:
+                        # Для EDW/ODS/CBD owner роль обычно совпадает с all
                         ad_group_name = f"{group_prefix} All {schema_name}".lower()
-                    if ad_group_name in ad_groups_set:
+                    
+                    if ad_group_name in all_ad_groups:
                         updates['ad_group_owner'] = ad_group_name
+                        print(f"  Найдена AD-группа '{ad_group_name}' для роли {role_owner}")
                 
+                # Для ADB: Write группа
                 if role_write and base_layer == 'ADB':
                     ad_group_name = f"{ad_layer} Write {schema_name}".lower()
-                    if ad_group_name in ad_groups_set:
+                    if ad_group_name in all_ad_groups:
                         updates['ad_group_write'] = ad_group_name
+                        print(f"  Найдена AD-группа '{ad_group_name}' для роли {role_write}")
                 
+                # Read группа для всех слоев
                 if role_read:
                     if base_layer == 'ADB':
                         ad_group_name = f"{ad_layer} Read {schema_name}".lower()
                     else:
                         ad_group_name = f"{group_prefix} Read {schema_name}".lower()
-                    if ad_group_name in ad_groups_set:
+                    
+                    if ad_group_name in all_ad_groups:
                         updates['ad_group_read'] = ad_group_name
+                        print(f"  Найдена AD-группа '{ad_group_name}' для роли {role_read}")
                 
                 # Выполняем обновление если есть совпадения
                 if updates:
@@ -387,7 +459,7 @@ def update_ad_groups_from_cache(ad_groups_set):
                     updates_count += len(updates)
             
             conn.commit()
-            print(f"Обновлено {updates_count} AD-групп в таблице маппинга.")
+            print(f"\nОбновлено {updates_count} AD-групп в таблице маппинга.")
     
     finally:
         conn.close()

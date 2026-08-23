@@ -13,11 +13,6 @@ env/
 .env.local
 .env.*
 
-# Build artifacts
-dist/
-build/
-*.egg-info/
-
 # Logs
 *.log
 
@@ -28,12 +23,8 @@ build/
 *.swo
 *.tmp
 
-# Coverage
-.coverage
-coverage/
-htmlcov/
-
-# Testing
-.pytest_cache/
-.mypy_cache/
+# Build/distribution
+build/
+dist/
+*.egg-info/
 ```

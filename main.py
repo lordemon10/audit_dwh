@@ -28,14 +28,11 @@ def main():
     # --- БЛОК 1: ПРОВЕРКИ БАЗ ДАННЫХ И AD ---
     ad_df = get_ad_users()
     
-    # Сначала строим маппинг схем и ролей из БД
-    print("\nПостроение маппинга схем и ролей из БД...")
-    build_mapping_from_db()
-    
-    # После выгрузки AD обновляем таблицу маппинга AD-группами
-    if ad_df is not None:
-        print("\nОбновление таблицы маппинга AD-группами...")
-        update_ad_groups_from_cache(ad_df)
+    if ad_df is not None and not ad_df.empty:
+        # Сначала строим маппинг схем и ролей из БД с передачей AD DataFrame
+        # Функция сама вызовет update_ad_groups_from_cache внутри
+        print("\nПостроение маппинга схем и ролей из БД с обновлением AD-групп...")
+        build_mapping_from_db(ad_df)
         
         for db_info in DB_LIST:
             print(

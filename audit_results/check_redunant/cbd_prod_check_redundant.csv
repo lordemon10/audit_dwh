@@ -1,6 +1,0 @@
-﻿rolname;Name;table_schema;table_name;privilege_type;duplicate_ad_group;revoke_sql
-tvbozhenkova;Боженкова Татьяна Владимировна (Tatyana Bozhenkova);cdm_analysis;ref_dict7gs_22;SELECT;CBD Read Cdm Analysis;"REVOKE SELECT ON cdm_analysis.ref_dict7gs_22 FROM tvbozhenkova;"
-tvbozhenkova;Боженкова Татьяна Владимировна (Tatyana Bozhenkova);cdm_analysis;uo_partner_fp;SELECT;CBD Read Cdm Analysis;"REVOKE SELECT ON cdm_analysis.uo_partner_fp FROM tvbozhenkova;"
-tvbozhenkova;Боженкова Татьяна Владимировна (Tatyana Bozhenkova);cdm_analysis;ref_gvs;SELECT;CBD Read Cdm Analysis;"REVOKE SELECT ON cdm_analysis.ref_gvs FROM tvbozhenkova;"
-tvbozhenkova;Боженкова Татьяна Владимировна (Tatyana Bozhenkova);cdm_analysis;ref_dictsalechanneltype200;SELECT;CBD Read Cdm Analysis;"REVOKE SELECT ON cdm_analysis.ref_dictsalechanneltype200 FROM tvbozhenkova;"
-tvbozhenkova;Боженкова Татьяна Владимировна (Tatyana Bozhenkova);cdm_analysis;ref_sale_channel_groupmk;SELECT;CBD Read Cdm Analysis;"REVOKE SELECT ON cdm_analysis.ref_sale_channel_groupmk FROM tvbozhenkova;"

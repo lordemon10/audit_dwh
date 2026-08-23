@@ -173,6 +173,21 @@ def bulk_upsert_violations(table_name, unique_columns, data_columns, values_list
             cur.execute(deactivate_query)
             
             # Шаг 2: Вставляем новые записи (или обновляем существующие)
+            # Сначала удаляем дубликаты внутри самого пакета данных по unique_columns
+            seen = set()
+            unique_values_list = []
+            for v in values_list:
+                # Создаем ключ из значений уникальных колонок
+                key = tuple(v[i] for i in range(len(unique_columns)))
+                if key not in seen:
+                    seen.add(key)
+                    unique_values_list.append(v)
+            
+            if len(unique_values_list) < len(values_list):
+                print(f"Удалено {len(values_list) - len(unique_values_list)} дубликатов из пакета данных для {table_name}")
+            
+            values_list = unique_values_list
+            
             columns_str = ", ".join(data_columns)
             unique_str = ", ".join(unique_columns)
             

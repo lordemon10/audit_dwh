@@ -24,9 +24,8 @@
 | `write_ad` | AD-группа Write (например, `ADB Write Schema`) - опционально |
 | `read_role` | Роль Read (например, `read_cc`) - опционально |
 | `read_ad` | AD-группа Read (например, `ODS Read CC`) - опционально |
-| `created_at` | Дата создания записи |
-| `last_updated_at` | Дата последнего обновления |
-| `is_active` | Флаг актуальности записи |
+
+**Примечание:** Технические колонки `created_at`, `last_updated_at`, `is_active` удалены. Таблица содержит только данные маппинга.
 
 ### Как заполнить таблицу маппинга:
 
@@ -60,8 +59,7 @@ ON CONFLICT (db_name, schemaname) DO UPDATE SET
     write_role = EXCLUDED.write_role,
     write_ad = EXCLUDED.write_ad,
     read_role = EXCLUDED.read_role,
-    read_ad = EXCLUDED.read_ad,
-    last_updated_at = CURRENT_TIMESTAMP;
+    read_ad = EXCLUDED.read_ad;
 ```
 
 3. **Важные правила заполнения:**
@@ -75,7 +73,6 @@ ON CONFLICT (db_name, schemaname) DO UPDATE SET
 ```sql
 SELECT db_name, schemaname, owner_ad, read_ad, write_ad 
 FROM audit_mapping 
-WHERE is_active = TRUE 
 ORDER BY db_name, schemaname;
 ```
 

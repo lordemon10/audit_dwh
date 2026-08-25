@@ -83,38 +83,54 @@ def run_check(db_df, ad_df, db_info, output_dir):
             continue
         
         # Определяем какую AD-группу искать в зависимости от привилегии
-        expected_ad_group = None
+        # Также проверяем группу уровня "All" которая покрывает все привилегии
+        expected_ad_groups = []
+        
+        # Добавляем группу All если она указана (покрывает все привилегии)
+        if mapping_entry.get('owner_ad'):
+            expected_ad_groups.append(mapping_entry.get('owner_ad'))
         
         if db_privilege == "select":
-            expected_ad_group = mapping_entry.get('read_ad')
+            if mapping_entry.get('read_ad'):
+                expected_ad_groups.append(mapping_entry.get('read_ad'))
         elif db_privilege in ["insert", "update", "delete"]:
-            expected_ad_group = mapping_entry.get('write_ad') or mapping_entry.get('read_ad')
+            # Для write привилегий проверяем write_ad, read_ad или owner_ad
+            if mapping_entry.get('write_ad'):
+                expected_ad_groups.append(mapping_entry.get('write_ad'))
+            if mapping_entry.get('read_ad'):
+                expected_ad_groups.append(mapping_entry.get('read_ad'))
         elif db_privilege == "all privileges":
-            expected_ad_group = mapping_entry.get('owner_ad') or mapping_entry.get('read_ad')
+            # Для all privileges проверяем owner_ad или read_ad
+            if mapping_entry.get('owner_ad'):
+                expected_ad_groups.append(mapping_entry.get('owner_ad'))
+            if mapping_entry.get('read_ad'):
+                expected_ad_groups.append(mapping_entry.get('read_ad'))
         
-        # Если ожидаемая AD-группа не указана в маппинге - пропускаем
-        if not expected_ad_group or not pd.notna(expected_ad_group):
+        # Если ожидаемые AD-группы не указаны в маппинге - пропускаем
+        if not expected_ad_groups or not any(pd.notna(g) and g for g in expected_ad_groups):
             continue
         
-        # Проверяем состоит ли пользователь в ожидаемой группе
+        # Проверяем состоит ли пользователь хотя бы в одной из ожидаемых групп
         has_valid_group = False
-        expected_ad_group_lower = str(expected_ad_group).lower()
+        expected_ad_groups_lower = [str(g).lower() for g in expected_ad_groups if pd.notna(g)]
         
         for group in user_groups:
             g_original_name = group.get("original_name", "")
-            if g_original_name and g_original_name.lower() == expected_ad_group_lower:
+            if g_original_name and g_original_name.lower() in expected_ad_groups_lower:
                 has_valid_group = True
                 break
         
         # Если грант есть, но подтверждающей группы нет -> нарушение
         if not has_valid_group:
+            # Формируем понятное сообщение с перечислением ожидаемых групп
+            expected_groups_str = ", ".join([g for g in expected_ad_groups if pd.notna(g)])
             violations.append({
                 'user_name': user,
                 'schema_name': row.get("table_schema", ""),
                 'table_name': db_table,
                 'privilege_type': db_privilege,
                 'object_type': 'TABLE',
-                'reason': f"No matching AD group {expected_ad_group} for {db_privilege} on {db_schema}"
+                'reason': f"No matching AD group ({expected_groups_str}) for {db_privilege} on {db_schema}"
             })
 
     if violations:

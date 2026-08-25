@@ -171,6 +171,11 @@ def bulk_upsert_violations(table_name, unique_columns, data_columns, values_list
     Массовая вставка или обновление записей о нарушениях.
     Оптимизировано для больших объемов данных с использованием execute_values.
     
+    Логика работы с is_active:
+    - При вставке новой записи: created_at = NOW(), is_active = TRUE
+    - При обновлении существующей: last_checked_at = NOW(), is_active = TRUE
+    - После обработки: все записи с last_checked_at < текущего запуска -> is_active = FALSE
+    
     Args:
         table_name: имя таблицы
         unique_columns: список колонок для UNIQUE constraints
@@ -183,14 +188,9 @@ def bulk_upsert_violations(table_name, unique_columns, data_columns, values_list
     conn = get_audit_connection()
     try:
         with conn.cursor() as cur:
-            # Шаг 1: Деактивируем все текущие активные записи
-            deactivate_query = f"""
-            UPDATE {table_name}
-            SET is_active = FALSE,
-                last_checked_at = CURRENT_TIMESTAMP
-            WHERE is_active = TRUE
-            """
-            cur.execute(deactivate_query)
+            # Шаг 1: Помечаем время начала проверки для последующего сравнения
+            cur.execute("SELECT CURRENT_TIMESTAMP")
+            check_start_time = cur.fetchone()[0]
             
             # Шаг 2: Вставляем новые записи (или обновляем существующие)
             # Сначала удаляем дубликаты внутри самого пакета данных по unique_columns
@@ -232,8 +232,9 @@ def bulk_upsert_violations(table_name, unique_columns, data_columns, values_list
             """
             
             # Подготавливаем данные с добавлением временных меток
+            # created_at устанавливается только при первом создании (DEFAULT CURRENT_TIMESTAMP)
             values_with_timestamps = [
-                tuple(list(v) + [psycopg2.extensions.AsIs('CURRENT_TIMESTAMP'), 
+                tuple(list(v) + [psycopg2.extensions.AsIs('DEFAULT'), 
                                 psycopg2.extensions.AsIs('CURRENT_TIMESTAMP'), 
                                 True])
                 for v in values_list
@@ -241,6 +242,16 @@ def bulk_upsert_violations(table_name, unique_columns, data_columns, values_list
             
             # Выполняем пакетную вставку с использованием execute_values (гораздо быстрее)
             execute_values(cur, insert_query, values_with_timestamps, page_size=50000)
+            
+            # Шаг 3: Деактивируем записи, которые не были обновлены в этой проверке
+            # (т.е. last_checked_at < времени начала текущей проверки)
+            deactivate_query = f"""
+            UPDATE {table_name}
+            SET is_active = FALSE
+            WHERE last_checked_at < %s
+            AND is_active = TRUE
+            """
+            cur.execute(deactivate_query, (check_start_time,))
             
             conn.commit()
             print(f"Обработано {len(values_list)} записей в таблице {table_name}")

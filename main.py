@@ -1,7 +1,7 @@
 import os
 from config import AD_CONFIG, DB_LIST, SQL_QUERY, OUTPUT_DIR, IDM_FILE_PATH, AUDIT_DB
 from utils import get_ad_users, get_db_users, init_audit_tables
-from utils.mapping_db import init_mapping_table, build_mapping_from_db, update_ad_groups_from_cache
+from utils.mapping_db import init_mapping_table
 from checks.check_nologin import run_check as run_nologin_check
 from checks.check_grant import run_check as run_grant_check
 from checks.check_redundant import run_check as run_redundant_check
@@ -17,9 +17,10 @@ def main():
     # Инициализация таблиц аудита в БД
     init_audit_tables()
     
-    # Инициализация таблицы маппинга групп
+    # Инициализация таблицы ручного маппинга групп
     print("=" * 60)
-    print("Инициализация таблицы маппинга групп доступа...")
+    print("Инициализация таблицы ручного маппинга групп доступа...")
+    print("ВАЖНО: Таблица audit_mapping должна быть заполнена ВРУЧНУЮ!")
     init_mapping_table()
     print("=" * 60)
 
@@ -29,10 +30,6 @@ def main():
     ad_df = get_ad_users()
     
     if ad_df is not None and not ad_df.empty:
-        # Сначала строим маппинг схем и ролей из БД с передачей AD DataFrame
-        # Функция сама вызовет update_ad_groups_from_cache внутри
-        print("\nПостроение маппинга схем и ролей из БД с обновлением AD-групп...")
-        build_mapping_from_db(ad_df)
         
         for db_info in DB_LIST:
             print(
@@ -57,14 +54,14 @@ def main():
                     db_df_grants, ad_df, db_info["name"], OUTPUT_DIR
                 )
 
-            # Проверка №3: Избыточные гранты
+            # Проверка №3: Избыточные гранты (использует ручной маппинг)
             db_df_schemas = get_db_users(
                 db_info, query=SQL_QUERY["schema_grants"]
             )
             if db_df_schemas is not None:
                 run_redundant_check(db_df_schemas, ad_df, db_info, OUTPUT_DIR)
 
-            # Проверка №4: Сиротские гранты (прямые гранты без AD группы)
+            # Проверка №4: Сиротские гранты (прямые гранты без AD группы, использует ручной маппинг)
             db_df_orphan = get_db_users(
                 db_info, query=SQL_QUERY["schema_grants"]
             )
@@ -79,7 +76,7 @@ def main():
 
     # --- БЛОК 2: АВТОНОМНАЯ ПРОВЕРКА IDM ---
 
-    # Запускаем проверку №4
+    # Запускаем проверку IDM
     run_idm_check(idm_file_path=IDM_FILE_PATH, ad_df=ad_df, output_dir=OUTPUT_DIR, db_name=AUDIT_DB["name"])
     run_direct_ad_check(idm_file_path=IDM_FILE_PATH, ad_df=ad_df, output_dir=OUTPUT_DIR, db_name=AUDIT_DB["name"])
 

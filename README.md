@@ -4,44 +4,85 @@
 
 **Важное изменение:** Результаты проверок теперь сохраняются в таблицу базы данных PostgreSQL вместо CSV-файлов. Для каждой проверки создана отдельная таблица с тремя служебными полями: `created_at` (дата создания записи), `last_checked_at` (дата последней проверки) и `is_active` (актуальна ли ошибка).
 
+**Критическое изменение:** Таблица маппинга `audit_mapping` теперь заполняется ВРУЧНУЮ администратором. Автоматическое построение маппинга ОТКЛЮЧЕНО.
+
 ---
 
-## 📊 Таблица маппинга групп доступа
+## 📊 Таблица ручного маппинга групп доступа
 
-При запуске скрипт автоматически строит таблицу `audit_mapping_group`, которая связывает схемы баз данных с ролями PostgreSQL и AD-группами. Эта таблица используется проверками `check_orphan_grants` и `check_redundant` для определения корректности выдачи доступов.
+При запуске скрипт создает таблицу `audit_mapping`, которую необходимо заполнить ВРУЧНУЮ. Эта таблица связывает схемы баз данных с ролями PostgreSQL и AD-группами. Проверки `check_orphan_grants` и `check_redundant` используют эту таблицу для определения корректности выдачи доступов.
 
-### Структура таблицы `audit_mapping_group`:
+### Структура таблицы `audit_mapping`:
 
 | Колонка | Описание |
 |---------|----------|
-| `db_name` | Имя базы данных |
-| `is_prod` | Признак продуктового контура (TRUE/FALSE) |
-| `ad_layer` | Слой AD (EDW, ODS, CBD, ADB, DWHT EDW, DWHT ODS, ADBT) |
-| `schema_name` | Имя схемы в БД |
-| `schema_owner_role` | Роль-владелец схемы (например, `all_bcapp`) |
-| `role_prefix_all` | Роль с полным доступом (например, `all_bcapp`) |
-| `ad_group_all` | Соответствующая AD-группа All (если существует) |
-| `role_prefix_owner` | Роль Owner (для ADB) |
-| `ad_group_owner` | Соответствующая AD-группа Owner (если существует) |
-| `role_prefix_write` | Роль Write (для ADB) |
-| `ad_group_write` | Соответствующая AD-группа Write (если существует) |
-| `role_prefix_read` | Роль Read (например, `read_bcapp`) |
-| `ad_group_read` | Соответствующая AD-группа Read (если существует) |
+| `db_name` | Имя базы данных (например, `ods_prod`, `edw_test2`) |
+| `schemaname` | Имя схемы в БД (например, `ab`, `core`, `actuary`) |
+| `owner_role` | Роль-владелец схемы (например, `all_cc`) - опционально |
+| `owner_ad` | AD-группа Owner/All (например, `ODS All CC`) - опционально |
+| `write_role` | Роль Write (для ADB) - опционально |
+| `write_ad` | AD-группа Write (например, `ADB Write Schema`) - опционально |
+| `read_role` | Роль Read (например, `read_cc`) - опционально |
+| `read_ad` | AD-группа Read (например, `ODS Read CC`) - опционально |
 | `created_at` | Дата создания записи |
 | `last_updated_at` | Дата последнего обновления |
 | `is_active` | Флаг актуальности записи |
 
-### Логика построения маппинга:
+### Как заполнить таблицу маппинга:
 
-1. **Извлечение префикса из владельца схемы:** Если владелец схемы `all_bcapp`, префикс = `bcapp`
-2. **Поиск соответствующих ролей:** Для префикса `bcapp` ищем роли `read_bcapp`, `write_bcapp` (для ADB), `owner_bcapp` (для ADB), `all_bcapp`
-3. **Проверка существования ролей в БД:** Подключаемся к каждой БД и проверяем наличие ролей
-4. **Сопоставление с AD-группами:** На основе имен ролей формируем ожидаемые имена AD-групп и проверяем их существование
+1. **Подключитесь к базе данных аудита** (указана в `config.py` как `AUDIT_DB`)
+
+2. **Заполните таблицу примером SQL:**
+
+```sql
+INSERT INTO audit_mapping (db_name, schemaname, owner_role, owner_ad, write_role, write_ad, read_role, read_ad)
+VALUES 
+    -- ODS Prod
+    ('ods_prod', 'ab', 'all_cc', 'ODS All CC', NULL, NULL, 'read_cc', 'ODS Read CC'),
+    ('ods_prod', 'actuary', 'all_actuary', 'ODS All Actuary', NULL, NULL, 'read_actuary', 'ODS Read Actuary'),
+    ('ods_prod', 'arctrl', 'all_arctrl', 'ODS All ARCtrl', NULL, NULL, 'read_arctrl', 'ODS Read ARCtrl'),
+    ('ods_prod', 'audatex', 'all_audatex', 'ODS All Audatex', NULL, NULL, 'read_audatex', 'ODS Read Audatex'),
+    ('ods_prod', 'auto', 'all_auto', 'ODS All Auto', NULL, NULL, 'read_auto', 'ODS Read Auto'),
+    
+    -- EDW Prod
+    ('edw_prod', 'core', 'all_core', 'EDW All Core', NULL, NULL, 'read_core', 'EDW Read Core'),
+    ('edw_prod', 'cdm_analysis', 'all_cdm_analysis', 'EDW All CDM Analysis', NULL, NULL, 'read_cdm_analysis', 'EDW Read CDM Analysis'),
+    
+    -- DWHT EDW Test (тестовые среды)
+    ('edw_preprod', 'core', NULL, 'DWHT EDW Read Core', NULL, NULL, 'read_core', 'DWHT EDW Read Core'),
+    ('eds_preprod', 'ab', NULL, 'DWHT ODS Read AB', NULL, NULL, 'read_ab', 'DWHT ODS Read AB'),
+    
+    -- ADB Prod
+    ('adb_prod', 'schema1', 'all_schema1', 'ADB All Schema1', 'write_schema1', 'ADB Write Schema1', 'read_schema1', 'ADB Read Schema1')
+ON CONFLICT (db_name, schemaname) DO UPDATE SET
+    owner_role = EXCLUDED.owner_role,
+    owner_ad = EXCLUDED.owner_ad,
+    write_role = EXCLUDED.write_role,
+    write_ad = EXCLUDED.write_ad,
+    read_role = EXCLUDED.read_role,
+    read_ad = EXCLUDED.read_ad,
+    last_updated_at = CURRENT_TIMESTAMP;
+```
+
+3. **Важные правила заполнения:**
+   - Если для схемы не заполнены AD-группы (`read_ad`, `write_ad`, `owner_ad`) - эта схема будет пропущена при проверках
+   - Заполняйте только те группы, которые реально существуют в AD
+   - Для тестовых сред (DWHT) указывайте полные имена групп например `DWHT EDW Read Core`
+   - Для продуктовых сред указывайте например `EDW Read Core`, `ODS Read CC`
+
+4. **Проверьте заполненность таблицы:**
+
+```sql
+SELECT db_name, schemaname, owner_ad, read_ad, write_ad 
+FROM audit_mapping 
+WHERE is_active = TRUE 
+ORDER BY db_name, schemaname;
+```
 
 ### Примеры имен AD-групп:
 
-- **EDW/ODS/CBD Prod:** `EDW Read <schema>`, `EDW All <schema>`, `ODW Read <schema>`
-- **EDW/ODS/CBD Test:** `DWHT EDW Read <schema>`, `DWHT ODS Read <schema>`
+- **EDW/ODS/CBD Prod:** `EDW Read <schema>`, `EDW All <schema>`, `ODS Read <schema>`, `ODS All <schema>`
+- **EDW/ODS/CBD Test (DWHT):** `DWHT EDW Read <schema>`, `DWHT ODS Read <schema>`
 - **ADB Prod:** `ADB Read <schema>`, `ADB Write <schema>`, `ADB Owner <schema>`
 - **ADBT Test:** `ADBT Read <schema>`, `ADBT Write <schema>`, `ADBT Owner <schema>`
 

@@ -31,7 +31,6 @@ def init_mapping_table():
         with conn.cursor() as cur:
             create_mapping_table = """
             CREATE TABLE IF NOT EXISTS audit_mapping (
-                id SERIAL PRIMARY KEY,
                 db_name VARCHAR(100) NOT NULL,
                 schemaname VARCHAR(255) NOT NULL,
                 owner_role VARCHAR(255),
@@ -40,13 +39,9 @@ def init_mapping_table():
                 write_ad VARCHAR(255),
                 read_role VARCHAR(50),
                 read_ad VARCHAR(255),
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                last_updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                is_active BOOLEAN DEFAULT TRUE,
-                UNIQUE (db_name, schemaname)
+                PRIMARY KEY (db_name, schemaname)
             );
             
-            CREATE INDEX IF NOT EXISTS idx_mapping_db_schema ON audit_mapping(db_name, schemaname);
             CREATE INDEX IF NOT EXISTS idx_mapping_roles ON audit_mapping(owner_role, write_role, read_role);
             CREATE INDEX IF NOT EXISTS idx_mapping_ad_groups ON audit_mapping(owner_ad, write_ad, read_ad);
             """
@@ -82,7 +77,7 @@ def get_mapping_for_db(db_name):
             read_role,
             read_ad
         FROM audit_mapping
-        WHERE db_name = %s AND is_active = TRUE
+        WHERE db_name = %s
         ORDER BY schemaname
         """
         
@@ -94,7 +89,7 @@ def get_mapping_for_db(db_name):
 
 def get_all_mapping():
     """
-    Получает весь активный маппинг из таблицы audit_mapping.
+    Получает весь маппинг из таблицы audit_mapping.
     
     Returns:
         DataFrame со всеми записями маппинга
@@ -114,7 +109,6 @@ def get_all_mapping():
             read_role,
             read_ad
         FROM audit_mapping
-        WHERE is_active = TRUE
         ORDER BY db_name, schemaname
         """
         
@@ -130,18 +124,18 @@ if __name__ == "__main__":
     init_mapping_table()
     
     print("\nГотово! Теперь заполните таблицу audit_mapping вручную.")
-    print("Пример SQL для заполнения:")
+    print("Пример SQL для заполнения (db_name должно совпадать с name из DB_LIST):")
     print("""
     INSERT INTO audit_mapping (db_name, schemaname, owner_role, owner_ad, write_role, write_ad, read_role, read_ad)
     VALUES 
-        ('ODS', 'ab', 'all_cc', 'ODS All CC', NULL, NULL, 'read_cc', 'ODS Read CC'),
-        ('ODS', 'actuary', 'all_actuary', 'ODS All Actuary', NULL, NULL, 'read_actuary', 'ODS Read Actuary')
+        ('edw_prod', 'ab', 'all_cc', 'EDW All CC', NULL, NULL, 'read_cc', 'EDW Read CC'),
+        ('edw_prod', 'actuary', 'all_actuary', 'EDW All Actuary', NULL, NULL, 'read_actuary', 'EDW Read Actuary'),
+        ('ods_prod', 'ab', 'all_cc', 'ODS All CC', NULL, NULL, 'read_cc', 'ODS Read CC')
     ON CONFLICT (db_name, schemaname) DO UPDATE SET
         owner_role = EXCLUDED.owner_role,
         owner_ad = EXCLUDED.owner_ad,
         write_role = EXCLUDED.write_role,
         write_ad = EXCLUDED.write_ad,
         read_role = EXCLUDED.read_role,
-        read_ad = EXCLUDED.read_ad,
-        last_updated_at = CURRENT_TIMESTAMP;
+        read_ad = EXCLUDED.read_ad;
     """)

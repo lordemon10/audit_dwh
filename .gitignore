@@ -4,39 +4,24 @@
 __pycache__/
 *.pyo
 *.pyd
-*.so
-*.egg-info/
-
-# Dependencies
-.venv/
-venv/
-.env
-.env.local
-.env.*
 
 # Logs and temp files
 *.log
 *.tmp
-*.swp
 
-# Editors
-.vscode/
-.idea/
+# Environment
+.env
+.env.local
+*.env.*
 
-# Coverage reports
+# Coverage
 .coverage
 coverage/
 htmlcov/
 
-# Python specific
-*.py[cod]
-*$py.class
-*$pyc.class
-*.sqlite
-*.db
+# MyPy
+.mypy_cache/
 
-# Backup files
-*~
-*.bak
-*.old
+# Pytest
+.pytest_cache/
 ```
